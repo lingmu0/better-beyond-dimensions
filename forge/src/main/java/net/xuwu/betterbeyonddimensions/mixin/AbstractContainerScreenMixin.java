@@ -4,8 +4,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.ScreenWidgetBridge;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.xuwu.betterbeyonddimensions.NetworkHandler;
@@ -73,7 +71,11 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
             & net.minecraft.client.gui.components.Renderable
             & net.minecraft.client.gui.narration.NarratableEntry> W bbd$addRenderableWidget(W widget)
     {
-        return ScreenWidgetBridge.add((Screen) (Object) this, widget);
+        ScreenWidgetAccessor screen = (ScreenWidgetAccessor) (Object) this;
+        screen.bbd$getChildren().add(widget);
+        screen.bbd$getRenderables().add(widget);
+        screen.bbd$getNarratables().add(widget);
+        return widget;
     }
 
     @Inject(method = "render", at = @At("TAIL"))
