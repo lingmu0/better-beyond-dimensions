@@ -9,6 +9,7 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
 import net.xuwu.betterbeyonddimensions.NetworkHandler;
 import net.xuwu.betterbeyonddimensions.client.ClientStorageState;
 import net.xuwu.betterbeyonddimensions.client.SidebarRenderer;
@@ -111,7 +112,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
                 x + 7,
                 y + SidebarRenderer.getGridTop(),
                 SidebarRenderer.WIDTH - 14,
-                Math.max(18, SidebarRenderer.getPanelHeight() - SidebarRenderer.getGridTop() - 7)
+                Math.max(18, SidebarRenderer.getPanelHeight(this) - SidebarRenderer.getGridTop() - 7)
         ));
 
         bbd$rebuildSidebarSlots();
@@ -130,6 +131,17 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         {
             bbd$rebuildSidebarSlots();
             SidebarRenderer.prepareSlots(this);
+        }
+    }
+
+    @Inject(method = "renderSlot", at = @At("HEAD"), cancellable = true)
+    private void bbd$skipNativeSidebarSlot(GuiGraphics graphics, Slot slot, CallbackInfo callbackInfo)
+    {
+        if (slot instanceof SidebarSlot)
+        {
+            // SidebarRenderer draws the item and Beyond Dimensions' long amount itself.
+            // Do not let vanilla draw a second stack/count layer over it.
+            callbackInfo.cancel();
         }
     }
 
