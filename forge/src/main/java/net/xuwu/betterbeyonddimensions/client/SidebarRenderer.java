@@ -12,8 +12,7 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.ItemStack;
-import net.xuwu.betterbeyonddimensions.NetworkHandler;
+import net.xuwu.betterbeyonddimensions.common.NetworkStorageSlot;
 import net.xuwu.betterbeyonddimensions.common.StorageSnapshot;
 
 import java.util.List;
@@ -29,7 +28,7 @@ public final class SidebarRenderer
 
     private static final int GRID_TOP = CommonTextures.TOP_BASE_COMMON_HEIGHT
             + CommonTextures.COMMON_CONNECTION_HEIGHT
-            + 22;
+            + 18;
     public static final int MAX_VISIBLE_ROWS = 8;
 
     private static final ClientStorageView STORAGE_VIEW = new ClientStorageView();
@@ -70,7 +69,6 @@ public final class SidebarRenderer
         return sidebarX + WIDTH - TOGGLE_WIDTH - CONTROL_GAP;
     }
 
-    /** Updates the real menu Slots before vanilla starts rendering its container slots. */
     public static void prepareSlots(SidebarScreenAccess host)
     {
         if (!ClientStorageState.available() || host.bbd$isSidebarHidden())
@@ -92,8 +90,6 @@ public final class SidebarRenderer
         {
             host.bbd$updateSidebarSlots(List.of());
             setWidgetsVisible(host, false);
-            host.bbd$getSidebarToggleButton().visible = false;
-            host.bbd$getSidebarToggleButton().active = false;
             return;
         }
 
@@ -130,7 +126,7 @@ public final class SidebarRenderer
                 {
                     graphics.fill(slotX, slotY, slotX + 16, slotY + 16, 0x80FFFFFF);
                 }
-                SidebarSlot slot = host.bbd$getSidebarSlots().get(row * SLOT_COLUMNS + col);
+                NetworkStorageSlot slot = host.bbd$getSidebarSlots().get(row * SLOT_COLUMNS + col);
                 if (entryIndex < 0 || entryIndex >= entries.size() || !slot.hasItem())
                 {
                     continue;
@@ -142,34 +138,6 @@ public final class SidebarRenderer
         }
 
         renderWidgets(host, graphics, mouseX, mouseY, partialTick);
-    }
-
-    public static boolean handleClick(SidebarScreenAccess host, double mouseX, double mouseY, int button)
-    {
-        if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || (button != 0 && button != 1))
-        {
-            return false;
-        }
-
-        List<ClientStorageView.Entry> entries = entries(host);
-        host.bbd$updateSidebarSlots(entries);
-        SidebarSlot slot = slotAt(host, mouseX, mouseY);
-        if (slot == null)
-        {
-            return false;
-        }
-
-        ItemStack stack = slot.getItem();
-        if (Screen.hasShiftDown() && !stack.isEmpty())
-        {
-            long amount = Math.min(slot.getStoredAmount(), Math.max(1, stack.getMaxStackSize()));
-            NetworkHandler.withdraw(stack, (int) amount);
-        }
-        else
-        {
-            NetworkHandler.clickSidebar(stack, button);
-        }
-        return true;
     }
 
     public static boolean handleMouseClick(SidebarScreenAccess host, double mouseX, double mouseY, int button)
@@ -205,12 +173,13 @@ public final class SidebarRenderer
             ((Screen) (Object) host).setFocused(null);
             search.setFocused(false);
         }
-        return handleClick(host, mouseX, mouseY, button);
+        // Let AbstractContainerScreen.slotClicked process real NetworkStorageSlots.
+        return false;
     }
 
     public static boolean handleScroll(SidebarScreenAccess host, double mouseX, double mouseY, double scrollAmount)
     {
-        if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || scrollAmount == 0.0D)
+        if (!ClientStorageState.available() || scrollAmount == 0.0D)
         {
             return false;
         }
@@ -235,14 +204,13 @@ public final class SidebarRenderer
     public static void renderTooltip(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY)
     {
         renderButtonTooltip(host, mouseX, mouseY);
-        if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || !host.bbd$getCarried().isEmpty())
+        if (!ClientStorageState.available() || !host.bbd$getCarried().isEmpty())
         {
             return;
         }
 
         List<ClientStorageView.Entry> entries = entries(host);
-        host.bbd$updateSidebarSlots(entries);
-        SidebarSlot slot = slotAt(host, mouseX, mouseY);
+        NetworkStorageSlot slot = slotAt(host, mouseX, mouseY);
         if (slot != null && slot.hasItem() && slot.getKey() != null)
         {
             slot.getKey().getRender().renderTooltip(
@@ -343,15 +311,7 @@ public final class SidebarRenderer
 
     private static void syncWidgets(SidebarScreenAccess host)
     {
-        boolean visible = !host.bbd$isSidebarHidden();
-        setWidgetsVisible(host, visible);
-        Button toggle = host.bbd$getSidebarToggleButton();
-        toggle.visible = true;
-        toggle.active = true;
-        toggle.setMessage(Component.literal(host.bbd$isSidebarHidden() ? "+" : "×"));
-        toggle.setTooltip(Tooltip.create(Component.translatable(host.bbd$isSidebarHidden()
-                ? "better_beyond_dimensions.tooltip.show_sidebar"
-                : "better_beyond_dimensions.tooltip.hide_sidebar")));
+        setWidgetsVisible(host, true);
         StorageSnapshot snapshot = ClientStorageState.snapshot();
         boolean player = snapshot.shiftPlayerInventory();
         boolean container = snapshot.shiftContainer();
@@ -361,6 +321,13 @@ public final class SidebarRenderer
                 "better_beyond_dimensions.button.shift_container", container ? "✓" : "×"));
         host.bbd$getDepositContainerButton().setMessage(Component.translatable("better_beyond_dimensions.button.deposit_container"));
         host.bbd$getDepositPlayerButton().setMessage(Component.translatable("better_beyond_dimensions.button.deposit_player"));
+        Button toggle = host.bbd$getSidebarToggleButton();
+        toggle.visible = true;
+        toggle.active = true;
+        toggle.setMessage(Component.literal(host.bbd$isSidebarHidden() ? "+" : "×"));
+        toggle.setTooltip(Tooltip.create(Component.translatable(host.bbd$isSidebarHidden()
+                ? "better_beyond_dimensions.tooltip.show_sidebar"
+                : "better_beyond_dimensions.tooltip.hide_sidebar")));
     }
 
     private static void setWidgetsVisible(SidebarScreenAccess host, boolean visible)
@@ -370,6 +337,7 @@ public final class SidebarRenderer
         Button container = host.bbd$getContainerShiftButton();
         Button depositContainer = host.bbd$getDepositContainerButton();
         Button depositPlayer = host.bbd$getDepositPlayerButton();
+        Button toggle = host.bbd$getSidebarToggleButton();
         search.visible = visible;
         search.active = visible;
         player.visible = visible;
@@ -380,6 +348,8 @@ public final class SidebarRenderer
         depositContainer.active = visible;
         depositPlayer.visible = visible;
         depositPlayer.active = visible;
+        toggle.visible = true;
+        toggle.active = true;
     }
 
     private static void renderWidgets(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY, float partialTick)
@@ -422,7 +392,7 @@ public final class SidebarRenderer
         return (ClientStorageState.scrollRow() + row) * SLOT_COLUMNS + col;
     }
 
-    private static SidebarSlot slotAt(SidebarScreenAccess host, double mouseX, double mouseY)
+    private static NetworkStorageSlot slotAt(SidebarScreenAccess host, double mouseX, double mouseY)
     {
         int storageIndex = cellIndexAt(host, mouseX, mouseY);
         if (storageIndex < 0)
@@ -431,12 +401,12 @@ public final class SidebarRenderer
         }
 
         int visualIndex = storageIndex - ClientStorageState.scrollRow() * SLOT_COLUMNS;
-        List<SidebarSlot> slots = host.bbd$getSidebarSlots();
+        List<NetworkStorageSlot> slots = host.bbd$getSidebarSlots();
         if (visualIndex < 0 || visualIndex >= slots.size())
         {
             return null;
         }
-        SidebarSlot slot = slots.get(visualIndex);
+        NetworkStorageSlot slot = slots.get(visualIndex);
         return slot.isActive() ? slot : null;
     }
 

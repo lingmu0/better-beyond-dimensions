@@ -10,10 +10,12 @@ import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -94,7 +96,8 @@ public final class StorageActions
         Container playerInventory = player.getInventory();
         for (Slot slot : menu.slots)
         {
-            if (slot.container != playerInventory && slot.hasItem())
+            if (!(slot instanceof NetworkStorageSlot)
+                    && slot.container != playerInventory && slot.hasItem())
             {
                 depositStack(network, slot.getItem());
             }
@@ -141,6 +144,215 @@ public final class StorageActions
         return true;
     }
 
+    /** Applies the current client sidebar layout to the server's real menu slots. */
+    public static void updateSidebarView(ServerPlayer player, List<ItemStack> viewStacks)
+    {
+        if (player == null || player.containerMenu == null
+                || !(player.containerMenu instanceof NetworkStorageMenuAccess access))
+        {
+            return;
+        }
+
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        UnifiedStorage storage = network == null ? null : network.getUnifiedStorage();
+        List<NetworkStorageSlot> slots = access.bbd$getNetworkSlots();
+        for (int index = 0; index < slots.size(); index++)
+        {
+            ItemStack requested = viewStacks != null && index < viewStacks.size()
+                    ? viewStacks.get(index) : ItemStack.EMPTY;
+            if (storage == null || requested == null || requested.isEmpty())
+            {
+                slots.get(index).clear();
+                continue;
+            }
+
+            ItemStackKey key = new ItemStackKey(requested);
+            KeyAmount stored = storage.getStackByKey(key);
+            if (stored == null || stored.isEmpty() || !(stored.key() instanceof ItemStackKey storedKey))
+            {
+                slots.get(index).clear();
+            }
+            else
+            {
+                slots.get(index).update(index, storedKey, stored.amount(), true);
+            }
+        }
+        player.containerMenu.broadcastChanges();
+    }
+
+    /** Refreshes visible server slots after a storage mutation. */
+    public static void refreshSidebarSlots(ServerPlayer player)
+    {
+        if (player == null || player.containerMenu == null
+                || !(player.containerMenu instanceof NetworkStorageMenuAccess access))
+        {
+            return;
+        }
+
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        UnifiedStorage storage = network == null ? null : network.getUnifiedStorage();
+        for (NetworkStorageSlot slot : access.bbd$getNetworkSlots())
+        {
+            ItemStackKey key = slot.getKey();
+            if (storage == null || key == null || !slot.isActive())
+            {
+                if (slot.hasItem())
+                {
+                    slot.clear();
+                }
+                continue;
+            }
+
+            KeyAmount stored = storage.getStackByKey(key);
+            if (stored == null || stored.isEmpty() || !(stored.key() instanceof ItemStackKey storedKey))
+            {
+                slot.clear();
+            }
+            else
+            {
+                slot.update(slot.getStorageIndex(), storedKey, stored.amount(), true);
+            }
+        }
+        player.containerMenu.broadcastChanges();
+    }
+
+    public static void handleSidebarClick(ServerPlayer player, int slotId, int button, ClickType clickType)
+    {
+        if (player == null || player.containerMenu == null
+                || slotId < 0 || slotId >= player.containerMenu.slots.size()
+                || !(player.containerMenu.slots.get(slotId) instanceof NetworkStorageSlot slot))
+        {
+            return;
+        }
+        handleSidebarClick(player, slot, button, clickType);
+    }
+
+    public static void handleSidebarClick(ServerPlayer player, NetworkStorageSlot slot, int button,
+                                          ClickType clickType)
+    {
+        if (player == null || player.containerMenu == null || slot == null)
+        {
+            return;
+        }
+        switch (clickType)
+        {
+            case PICKUP -> clickSidebar(player, slot, button);
+            case QUICK_MOVE -> quickMoveSidebar(player, slot);
+            case THROW -> throwFromSidebar(player, slot, button);
+            case PICKUP_ALL -> pickupAllFromSidebar(player, slot);
+            case SWAP -> swapHotbarWithSidebar(player, slot, button);
+            case QUICK_CRAFT, CLONE -> {
+            }
+        }
+        player.containerMenu.broadcastChanges();
+    }
+
+    /** Shift-clicking a network cell moves one vanilla-sized group into the player inventory. */
+    public static void quickMoveSidebar(ServerPlayer player, NetworkStorageSlot slot)
+    {
+        if (player == null || slot == null || slot.getKey() == null)
+        {
+            return;
+        }
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        if (network == null)
+        {
+            return;
+        }
+
+        ItemStackKey key = slot.getKey();
+        long group = Math.min(slot.getStoredAmount(), Math.max(1L, key.getVanillaMaxStackSize()));
+        KeyAmount extracted = network.getUnifiedStorage().extract(key, group, false, false);
+        if (!(extracted.key() instanceof ItemStackKey extractedKey) || extracted.amount() <= 0L)
+        {
+            return;
+        }
+
+        ItemStack output = extractedKey.copyStackWithCount(extracted.amount());
+        int inserted = insertIntoPlayerInventory(player, output);
+        long rollback = extracted.amount() - inserted;
+        if (rollback > 0L)
+        {
+            network.getUnifiedStorage().insert(extractedKey, rollback, false);
+        }
+    }
+
+    private static void throwFromSidebar(ServerPlayer player, NetworkStorageSlot slot, int button)
+    {
+        if (slot == null || slot.getKey() == null)
+        {
+            return;
+        }
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        if (network == null)
+        {
+            return;
+        }
+        long amount = button == 1
+                ? Math.min(slot.getStoredAmount(), Math.max(1L, slot.getKey().getVanillaMaxStackSize()))
+                : 1L;
+        KeyAmount extracted = network.getUnifiedStorage().extract(slot.getKey(), amount, false, false);
+        if (extracted.key() instanceof ItemStackKey key && extracted.amount() > 0L)
+        {
+            player.drop(key.copyStackWithCount(extracted.amount()), true);
+        }
+    }
+
+    private static void pickupAllFromSidebar(ServerPlayer player, NetworkStorageSlot slot)
+    {
+        ItemStack carried = player.containerMenu.getCarried().copy();
+        if (carried.isEmpty())
+        {
+            return;
+        }
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        if (network == null)
+        {
+            return;
+        }
+        ItemStackKey key = new ItemStackKey(carried);
+        long space = Math.max(0L, carried.getMaxStackSize() - (long) carried.getCount());
+        if (space <= 0L)
+        {
+            return;
+        }
+        KeyAmount extracted = network.getUnifiedStorage().extract(key, space, false, false);
+        if (extracted.amount() > 0L)
+        {
+            carried.grow((int) Math.min((long) Integer.MAX_VALUE, extracted.amount()));
+            player.containerMenu.setCarried(carried);
+        }
+    }
+
+    private static void swapHotbarWithSidebar(ServerPlayer player, NetworkStorageSlot slot, int button)
+    {
+        if (button < 0 || button >= 9 || slot == null || slot.getKey() == null)
+        {
+            return;
+        }
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        if (network == null)
+        {
+            return;
+        }
+        ItemStack hotbar = player.getInventory().getItem(button).copy();
+        if (!hotbar.isEmpty())
+        {
+            ItemStackKey key = new ItemStackKey(hotbar);
+            KeyAmount remaining = network.getUnifiedStorage().insert(key, hotbar.getCount(), false);
+            long inserted = Math.max(0L, hotbar.getCount() - remaining.amount());
+            if (inserted > 0L)
+            {
+                hotbar.shrink((int) inserted);
+                player.getInventory().setItem(button, hotbar);
+            }
+        }
+        else
+        {
+            quickMoveSidebar(player, slot);
+        }
+    }
+
     public static void withdraw(ServerPlayer player, ItemStack requestedStack, long amount)
     {
         if (requestedStack == null || requestedStack.isEmpty() || amount <= 0L)
@@ -173,9 +385,8 @@ public final class StorageActions
     }
 
     /**
-     * Fills real crafting slots for JEI's recipe-transfer button.  The client only sends the
-     * selected ingredient variants and target slot ids; all item movement is performed here on
-     * the logical server, using the network before the player's inventory.
+     * Fills real crafting slots for JEI's recipe-transfer button. The client sends only the
+     * selected ingredient variants and target slot ids; movement is performed on the server.
      */
     public static void fillRecipe(ServerPlayer player, List<RecipeFill> fills)
     {
@@ -186,7 +397,7 @@ public final class StorageActions
 
         DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
         UnifiedStorage storage = network == null ? null : network.getUnifiedStorage();
-        List<Container> changedContainers = new java.util.ArrayList<>();
+        List<Container> changedContainers = new ArrayList<>();
 
         for (RecipeFill fill : fills)
         {
@@ -279,6 +490,15 @@ public final class StorageActions
      * The server menu's carried stack is authoritative, so the cursor can continue into vanilla
      * container slots after taking an item from the sidebar.
      */
+    public static void clickSidebar(ServerPlayer player, NetworkStorageSlot slot, int button)
+    {
+        if (slot == null || slot.getKey() == null)
+        {
+            return;
+        }
+        clickSidebar(player, slot.getKey().copyStackWithCount(1), button);
+    }
+
     public static void clickSidebar(ServerPlayer player, ItemStack requestedStack, int button)
     {
         if (button != 0 && button != 1)
@@ -327,10 +547,30 @@ public final class StorageActions
         else
         {
             ItemStackKey carriedKey = new ItemStackKey(carried);
-            // The sidebar is a storage view, not a two-slot swap surface.  Match the native
-            // Beyond Dimensions storage interaction: a carried stack is always inserted into
-            // the network, even when the clicked cell contains a different item.
-            insertCarried(storage, player, carried, carriedKey, button);
+            if (clickedKey == null || clicked == null || clickedKey.isSameTypeSameComponents(carriedKey))
+            {
+                insertCarried(storage, player, carried, carriedKey, button);
+            }
+            else if (button == 0
+                    && carried.getCount() <= carried.getMaxStackSize()
+                    && clicked.amount() <= clickedKey.getVanillaMaxStackSize())
+            {
+                // Match the native storage slot's left-click swap when both stacks fit one slot.
+                KeyAmount extracted = storage.extract(clickedKey, clicked.amount(), false, false);
+                if (extracted.key() instanceof ItemStackKey extractedKey && extracted.amount() > 0L)
+                {
+                    KeyAmount remaining = storage.insert(carriedKey, carried.getCount(), true);
+                    if (remaining.isEmpty())
+                    {
+                        storage.insert(carriedKey, carried.getCount(), false);
+                        player.containerMenu.setCarried(extractedKey.copyStackWithCount(extracted.amount()));
+                    }
+                    else
+                    {
+                        storage.insert(extracted.key(), extracted.amount(), false);
+                    }
+                }
+            }
         }
 
         player.containerMenu.broadcastChanges();

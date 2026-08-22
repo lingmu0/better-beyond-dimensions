@@ -1,24 +1,22 @@
-package net.xuwu.betterbeyonddimensions.client;
+package net.xuwu.betterbeyonddimensions.common;
 
 import com.wintercogs.beyonddimensions.api.storage.key.impl.ItemStackKey;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * A client-side Slot for one visible cell in the sidebar.
- *
- * <p>The storage itself remains server authoritative.  The Slot deliberately exposes the
- * current network stack to screen integrations (JEI, hover handling, etc.), while mutations
- * are routed through the same sidebar click packets as Beyond Dimensions' storage slots.</p>
+ * A real menu slot whose contents are backed by the Beyond Dimensions network.
+ * The long amount and mutations are handled by the server storage actions.
  */
-public final class SidebarSlot extends Slot
+public final class NetworkStorageSlot extends Slot
 {
     private static final Container EMPTY_CONTAINER = new SimpleContainer(0);
 
-    private final Object owner;
+    private final AbstractContainerMenu owner;
     private final int visualIndex;
     private ItemStackKey key;
     private ItemStack renderStack = ItemStack.EMPTY;
@@ -26,35 +24,35 @@ public final class SidebarSlot extends Slot
     private int storageIndex = -1;
     private boolean active;
 
-    public SidebarSlot(Object owner, int visualIndex, int x, int y)
+    public NetworkStorageSlot(AbstractContainerMenu owner, int visualIndex, int x, int y)
     {
         super(EMPTY_CONTAINER, 0, x, y);
         this.owner = owner;
         this.visualIndex = visualIndex;
     }
 
-    public void update(int storageIndex, ClientStorageView.Entry entry, boolean active)
-    {
-        clear();
-        this.active = active;
-        if (!active || entry == null || entry.key() == null || entry.amount() <= 0L)
-        {
-            return;
-        }
-
-        this.storageIndex = storageIndex;
-        this.key = entry.key();
-        this.amount = entry.amount();
-        this.renderStack = this.key.getRenderStack().copy();
-    }
-
-    public void clear()
+    public void update(int storageIndex, ItemStackKey key, long amount, boolean active)
     {
         this.storageIndex = -1;
         this.key = null;
         this.renderStack = ItemStack.EMPTY;
         this.amount = 0L;
-        this.active = false;
+        this.active = active;
+
+        if (!active || key == null || key.isEmpty() || amount <= 0L)
+        {
+            return;
+        }
+
+        this.storageIndex = storageIndex;
+        this.key = key;
+        this.amount = amount;
+        this.renderStack = key.getRenderStack().copy();
+    }
+
+    public void clear()
+    {
+        update(-1, null, 0L, false);
     }
 
     public int getVisualIndex()
@@ -77,6 +75,11 @@ public final class SidebarSlot extends Slot
         return amount;
     }
 
+    public ItemStack copyViewStack()
+    {
+        return key == null ? ItemStack.EMPTY : key.copyStack();
+    }
+
     @Override
     public ItemStack getItem()
     {
@@ -85,9 +88,8 @@ public final class SidebarSlot extends Slot
             return ItemStack.EMPTY;
         }
 
-        ItemStack stack = renderStack.copy();
-        stack.setCount((int) Math.min((long) stack.getMaxStackSize(), amount));
-        return stack;
+        long count = Math.min(amount, Math.max(1L, key.getVanillaMaxStackSize()));
+        return key.copyStackWithCount(count);
     }
 
     @Override
@@ -123,13 +125,7 @@ public final class SidebarSlot extends Slot
     @Override
     public void set(ItemStack stack)
     {
-        // Sidebar mutations are server-authoritative and go through NetworkHandler.
-    }
-
-    @Override
-    public void setByPlayer(ItemStack stack)
-    {
-        // Sidebar mutations are server-authoritative and go through NetworkHandler.
+        // Mutations go through StorageActions.
     }
 
     @Override
@@ -141,7 +137,13 @@ public final class SidebarSlot extends Slot
     @Override
     public void setChanged()
     {
-        // The snapshot update is the change notification for this client-side Slot.
+        // Storage mutations explicitly broadcast the menu and snapshot.
+    }
+
+    @Override
+    public int getContainerSlot()
+    {
+        return visualIndex;
     }
 
     @Override
@@ -153,6 +155,6 @@ public final class SidebarSlot extends Slot
     @Override
     public boolean isSameInventory(Slot other)
     {
-        return other instanceof SidebarSlot sidebarSlot && sidebarSlot.owner == owner;
+        return other instanceof NetworkStorageSlot networkSlot && networkSlot.owner == owner;
     }
 }
