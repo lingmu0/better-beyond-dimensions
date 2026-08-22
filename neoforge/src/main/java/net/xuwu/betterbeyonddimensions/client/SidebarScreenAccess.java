@@ -3,6 +3,7 @@ package net.xuwu.betterbeyonddimensions.client;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.world.item.ItemStack;
+import net.xuwu.betterbeyonddimensions.common.NetworkStorageSlot;
 
 import java.util.List;
 
@@ -35,7 +36,7 @@ public interface SidebarScreenAccess
 
     int bbd$getSidebarHeight();
 
-    List<SidebarSlot> bbd$getSidebarSlots();
+    List<NetworkStorageSlot> bbd$getSidebarSlots();
 
     void bbd$rebuildSidebarSlots();
 

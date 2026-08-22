@@ -10,12 +10,15 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
 import net.xuwu.betterbeyonddimensions.NetworkHandler;
 import net.xuwu.betterbeyonddimensions.client.ClientStorageState;
 import net.xuwu.betterbeyonddimensions.client.SidebarRenderer;
 import net.xuwu.betterbeyonddimensions.client.SidebarScreenAccess;
-import net.xuwu.betterbeyonddimensions.client.SidebarSlot;
+import net.xuwu.betterbeyonddimensions.common.NetworkStorageMenuAccess;
+import net.xuwu.betterbeyonddimensions.common.NetworkStorageSlot;
+import com.wintercogs.beyonddimensions.api.storage.key.impl.ItemStackKey;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -46,12 +49,23 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Unique private net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget bbd$scrollWidget;
     @Unique private boolean bbd$consumeSidebarMouseRelease;
     @Unique private boolean bbd$sidebarHidden;
-    @Unique private final List<SidebarSlot> bbd$sidebarSlots = new ArrayList<>();
+    @Unique private final List<NetworkStorageSlot> bbd$sidebarSlots = new ArrayList<>();
+    @Unique private List<ItemStackKey> bbd$lastSidebarView = List.of();
 
     @Inject(method = "init", at = @At("TAIL"))
     private void bbd$initSidebar(CallbackInfo callbackInfo)
     {
-        if (bbd$isSidebarExcludedScreen())
+        if (bbd$isBeyondScreen())
+        {
+            ClientStorageState.clear();
+            return;
+        }
+
+        // The client menu must contain the same slots as the server menu before JEI and
+        // vanilla hit-testing inspect it. Creative screens keep the slots for index parity,
+        // but deliberately do not create or render the sidebar widgets.
+        bbd$rebuildSidebarSlots();
+        if (bbd$isCreativeScreen())
         {
             ClientStorageState.clear();
             return;
@@ -116,8 +130,6 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
                 Math.max(18, SidebarRenderer.getPanelHeight() - SidebarRenderer.getGridTop() - 7)
         ));
 
-        bbd$rebuildSidebarSlots();
-
         bbd$setWidgetsVisible(false);
         bbd$sidebarToggleButton.visible = false;
         bbd$sidebarToggleButton.active = false;
@@ -138,7 +150,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Inject(method = "renderSlot", at = @At("HEAD"), cancellable = true)
     private void bbd$skipNativeSidebarSlot(GuiGraphics graphics, Slot slot, CallbackInfo callbackInfo)
     {
-        if (slot instanceof SidebarSlot)
+        if (slot instanceof NetworkStorageSlot)
         {
             // SidebarRenderer draws the item and Beyond Dimensions' long amount itself.
             // Do not let vanilla draw a second stack/count layer over it.
@@ -180,6 +192,17 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         }
     }
 
+    @Inject(method = "slotClicked", at = @At("HEAD"), cancellable = true)
+    private void bbd$networkSlotClicked(Slot slot, int slotId, int button, ClickType clickType,
+                                         CallbackInfo callbackInfo)
+    {
+        if (!bbd$isSidebarExcludedScreen() && slot instanceof NetworkStorageSlot)
+        {
+            NetworkHandler.clickSidebarSlot(slotId, button, clickType);
+            callbackInfo.cancel();
+        }
+    }
+
     @Inject(method = "mouseReleased", at = @At("HEAD"), cancellable = true)
     private void bbd$sidebarRelease(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> callbackInfo)
     {
@@ -192,8 +215,19 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Unique
     private boolean bbd$isSidebarExcludedScreen()
     {
-        return this.getClass().getName().startsWith("com.wintercogs.beyonddimensions.")
-                || (Object) this instanceof CreativeModeInventoryScreen;
+        return bbd$isBeyondScreen() || bbd$isCreativeScreen();
+    }
+
+    @Unique
+    private boolean bbd$isBeyondScreen()
+    {
+        return this.getClass().getName().startsWith("com.wintercogs.beyonddimensions.");
+    }
+
+    @Unique
+    private boolean bbd$isCreativeScreen()
+    {
+        return (Object) this instanceof CreativeModeInventoryScreen;
     }
 
     @Unique
@@ -309,7 +343,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     }
 
     @Override
-    public List<SidebarSlot> bbd$getSidebarSlots()
+    public List<NetworkStorageSlot> bbd$getSidebarSlots()
     {
         return bbd$sidebarSlots;
     }
@@ -317,32 +351,17 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Override
     public void bbd$rebuildSidebarSlots()
     {
-        if (menu == null || bbd$isSidebarExcludedScreen())
+        if (menu == null || bbd$isBeyondScreen())
         {
             return;
         }
 
-        AbstractContainerMenuAccessor accessor = (AbstractContainerMenuAccessor) (Object) menu;
         int slotBaseX = bbd$getSidebarX() + 8 - leftPos;
         int slotBaseY = bbd$getSidebarY() + SidebarRenderer.getGridTop() + 1 - topPos;
-        for (int index = bbd$sidebarSlots.size(); index < SidebarRenderer.SLOT_COLUMNS * SidebarRenderer.MAX_VISIBLE_ROWS; index++)
-        {
-            int row = index / SidebarRenderer.SLOT_COLUMNS;
-            int column = index % SidebarRenderer.SLOT_COLUMNS;
-            SidebarSlot slot = new SidebarSlot(this, index,
-                    slotBaseX + column * 18,
-                    slotBaseY + row * 18);
-            accessor.bbd$addSlot(slot);
-            bbd$sidebarSlots.add(slot);
-        }
-
-        for (SidebarSlot slot : bbd$sidebarSlots)
-        {
-            if (!menu.slots.contains(slot))
-            {
-                accessor.bbd$addSlot(slot);
-            }
-        }
+        NetworkStorageMenuAccess access = (NetworkStorageMenuAccess) (Object) menu;
+        access.bbd$ensureNetworkSlots(slotBaseX, slotBaseY);
+        bbd$sidebarSlots.clear();
+        bbd$sidebarSlots.addAll(access.bbd$getNetworkSlots());
     }
 
     @Override
@@ -355,8 +374,31 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
             int row = index / SidebarRenderer.SLOT_COLUMNS;
             int entryIndex = firstEntry + index;
             boolean active = ClientStorageState.available() && row < rows;
-            SidebarSlot slot = bbd$sidebarSlots.get(index);
-            slot.update(entryIndex, entryIndex < entries.size() ? entries.get(entryIndex) : null, active);
+            NetworkStorageSlot slot = bbd$sidebarSlots.get(index);
+            net.xuwu.betterbeyonddimensions.client.ClientStorageView.Entry entry =
+                    entryIndex < entries.size() ? entries.get(entryIndex) : null;
+            if (entry == null)
+            {
+                slot.clear();
+            }
+            else
+            {
+                slot.update(entryIndex, entry.key(), entry.amount(), active);
+            }
+        }
+
+        List<ItemStackKey> viewKeys = new ArrayList<>(bbd$sidebarSlots.size());
+        List<net.minecraft.world.item.ItemStack> viewStacks = new ArrayList<>(bbd$sidebarSlots.size());
+        for (NetworkStorageSlot slot : bbd$sidebarSlots)
+        {
+            ItemStackKey key = slot.getKey();
+            viewKeys.add(key == null ? ItemStackKey.EMPTY : key);
+            viewStacks.add(key == null ? net.minecraft.world.item.ItemStack.EMPTY : key.copyStack());
+        }
+        if (!viewKeys.equals(bbd$lastSidebarView))
+        {
+            bbd$lastSidebarView = List.copyOf(viewKeys);
+            NetworkHandler.updateSidebarView(viewStacks);
         }
     }
 

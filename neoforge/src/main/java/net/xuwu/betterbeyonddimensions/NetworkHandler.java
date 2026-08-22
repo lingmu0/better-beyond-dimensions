@@ -7,6 +7,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
@@ -45,6 +46,10 @@ public final class NetworkHandler
                 new DirectionalPayloadHandler<>(WithdrawPacket::handle, WithdrawPacket::handle));
         registrar.playBidirectional(SidebarClickPacket.TYPE, SidebarClickPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(SidebarClickPacket::handle, SidebarClickPacket::handle));
+        registrar.playBidirectional(SidebarMenuClickPacket.TYPE, SidebarMenuClickPacket.STREAM_CODEC,
+                new DirectionalPayloadHandler<>(SidebarMenuClickPacket::handle, SidebarMenuClickPacket::handle));
+        registrar.playBidirectional(SidebarViewPacket.TYPE, SidebarViewPacket.STREAM_CODEC,
+                new DirectionalPayloadHandler<>(SidebarViewPacket::handle, SidebarViewPacket::handle));
         registrar.playBidirectional(RecipeFillPacket.TYPE, RecipeFillPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(RecipeFillPacket::handle, RecipeFillPacket::handle));
     }
@@ -91,6 +96,25 @@ public final class NetworkHandler
         PacketDistributor.sendToServer(new SidebarClickPacket(request, button));
     }
 
+    public static void clickSidebarSlot(int slotId, int button, ClickType clickType)
+    {
+        PacketDistributor.sendToServer(new SidebarMenuClickPacket(slotId, button, clickType.ordinal()));
+    }
+
+    public static void updateSidebarView(List<ItemStack> stacks)
+    {
+        List<ItemStack> values = new ArrayList<>(Math.min(40, stacks == null ? 0 : stacks.size()));
+        if (stacks != null)
+        {
+            for (int index = 0; index < Math.min(40, stacks.size()); index++)
+            {
+                ItemStack stack = stacks.get(index);
+                values.add(stack == null ? ItemStack.EMPTY : stack.copy());
+            }
+        }
+        PacketDistributor.sendToServer(new SidebarViewPacket(values));
+    }
+
     public static void fillRecipe(List<RecipeFill> fills)
     {
         if (fills == null || fills.isEmpty())
@@ -102,6 +126,7 @@ public final class NetworkHandler
 
     public static void sendSnapshot(ServerPlayer player)
     {
+        StorageActions.refreshSidebarSlots(player);
         PacketDistributor.sendToPlayer(player, new SnapshotPacket(NetworkStorage.snapshot(player)));
     }
 
@@ -321,6 +346,95 @@ public final class NetworkHandler
         }
     }
 
+    private record SidebarMenuClickPacket(int slotId, int button, int clickType) implements CustomPacketPayload
+    {
+        private static final Type<SidebarMenuClickPacket> TYPE =
+                new Type<>(BetterBeyondDimensions.id("sidebar_menu_click"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, SidebarMenuClickPacket> STREAM_CODEC =
+                StreamCodec.composite(
+                        ByteBufCodecs.VAR_INT,
+                        SidebarMenuClickPacket::slotId,
+                        ByteBufCodecs.VAR_INT,
+                        SidebarMenuClickPacket::button,
+                        ByteBufCodecs.VAR_INT,
+                        SidebarMenuClickPacket::clickType,
+                        SidebarMenuClickPacket::new
+                );
+
+        private static void handle(SidebarMenuClickPacket packet, IPayloadContext context)
+        {
+            if (context.flow() == PacketFlow.SERVERBOUND)
+            {
+                context.enqueueWork(() -> {
+                    if (!(context.player() instanceof ServerPlayer player))
+                    {
+                        return;
+                    }
+                    ClickType[] values = ClickType.values();
+                    int typeIndex = Math.max(0, Math.min(values.length - 1, packet.clickType));
+                    StorageActions.handleSidebarClick(player, packet.slotId, packet.button, values[typeIndex]);
+                    sendSnapshot(player);
+                });
+            }
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type()
+        {
+            return TYPE;
+        }
+    }
+
+    private record SidebarViewPacket(List<ItemStack> stacks) implements CustomPacketPayload
+    {
+        private static final Type<SidebarViewPacket> TYPE = new Type<>(BetterBeyondDimensions.id("sidebar_view"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, SidebarViewPacket> STREAM_CODEC = new StreamCodec<>()
+        {
+            @Override
+            public void encode(RegistryFriendlyByteBuf buffer, SidebarViewPacket packet)
+            {
+                List<ItemStack> values = packet.stacks == null ? List.of() : packet.stacks;
+                int count = Math.min(40, values.size());
+                buffer.writeVarInt(count);
+                for (int index = 0; index < count; index++)
+                {
+                    ItemStack.OPTIONAL_STREAM_CODEC.encode(buffer, values.get(index));
+                }
+            }
+
+            @Override
+            public SidebarViewPacket decode(RegistryFriendlyByteBuf buffer)
+            {
+                int count = Math.min(40, Math.max(0, buffer.readVarInt()));
+                List<ItemStack> values = new ArrayList<>(count);
+                for (int index = 0; index < count; index++)
+                {
+                    values.add(ItemStack.OPTIONAL_STREAM_CODEC.decode(buffer));
+                }
+                return new SidebarViewPacket(values);
+            }
+        };
+
+        private static void handle(SidebarViewPacket packet, IPayloadContext context)
+        {
+            if (context.flow() == PacketFlow.SERVERBOUND)
+            {
+                context.enqueueWork(() -> {
+                    if (context.player() instanceof ServerPlayer player)
+                    {
+                        StorageActions.updateSidebarView(player, packet.stacks);
+                    }
+                });
+            }
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type()
+        {
+            return TYPE;
+        }
+    }
+
     private record RecipeFillPacket(List<RecipeFill> fills) implements CustomPacketPayload
     {
         private static final Type<RecipeFillPacket> TYPE = new Type<>(BetterBeyondDimensions.id("recipe_fill"));
@@ -378,5 +492,4 @@ public final class NetworkHandler
             return TYPE;
         }
     }
-
 }

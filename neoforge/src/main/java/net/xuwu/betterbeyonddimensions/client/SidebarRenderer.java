@@ -12,8 +12,7 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.ItemStack;
-import net.xuwu.betterbeyonddimensions.NetworkHandler;
+import net.xuwu.betterbeyonddimensions.common.NetworkStorageSlot;
 import net.xuwu.betterbeyonddimensions.common.StorageSnapshot;
 
 import java.util.List;
@@ -130,7 +129,7 @@ public final class SidebarRenderer
                 {
                     graphics.fill(slotX, slotY, slotX + 16, slotY + 16, 0x80FFFFFF);
                 }
-                SidebarSlot slot = host.bbd$getSidebarSlots().get(row * SLOT_COLUMNS + col);
+                NetworkStorageSlot slot = host.bbd$getSidebarSlots().get(row * SLOT_COLUMNS + col);
                 if (entryIndex < 0 || entryIndex >= entries.size() || !slot.hasItem())
                 {
                     continue;
@@ -142,34 +141,6 @@ public final class SidebarRenderer
         }
 
         renderWidgets(host, graphics, mouseX, mouseY, partialTick);
-    }
-
-    public static boolean handleClick(SidebarScreenAccess host, double mouseX, double mouseY, int button)
-    {
-        if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || (button != 0 && button != 1))
-        {
-            return false;
-        }
-
-        List<ClientStorageView.Entry> entries = entries(host);
-        host.bbd$updateSidebarSlots(entries);
-        SidebarSlot slot = slotAt(host, mouseX, mouseY);
-        if (slot == null)
-        {
-            return false;
-        }
-
-        ItemStack stack = slot.getItem();
-        if (Screen.hasShiftDown() && !stack.isEmpty())
-        {
-            long amount = Math.min(slot.getStoredAmount(), Math.max(1, stack.getMaxStackSize()));
-            NetworkHandler.withdraw(stack, (int) amount);
-        }
-        else
-        {
-            NetworkHandler.clickSidebar(stack, button);
-        }
-        return true;
     }
 
     public static boolean handleMouseClick(SidebarScreenAccess host, double mouseX, double mouseY, int button)
@@ -205,7 +176,9 @@ public final class SidebarRenderer
             ((Screen) (Object) host).setFocused(null);
             search.setFocused(false);
         }
-        return handleClick(host, mouseX, mouseY, button);
+        // Leave slot clicks to AbstractContainerScreen.slotClicked.  The screen mixin converts
+        // a real NetworkStorageSlot click into the same server packet used by the native menu.
+        return false;
     }
 
     public static boolean handleScroll(SidebarScreenAccess host, double mouseX, double mouseY, double scrollAmount)
@@ -242,7 +215,7 @@ public final class SidebarRenderer
 
         List<ClientStorageView.Entry> entries = entries(host);
         host.bbd$updateSidebarSlots(entries);
-        SidebarSlot slot = slotAt(host, mouseX, mouseY);
+        NetworkStorageSlot slot = slotAt(host, mouseX, mouseY);
         if (slot != null && slot.hasItem() && slot.getKey() != null)
         {
             slot.getKey().getRender().renderTooltip(
@@ -422,7 +395,7 @@ public final class SidebarRenderer
         return (ClientStorageState.scrollRow() + row) * SLOT_COLUMNS + col;
     }
 
-    private static SidebarSlot slotAt(SidebarScreenAccess host, double mouseX, double mouseY)
+    private static NetworkStorageSlot slotAt(SidebarScreenAccess host, double mouseX, double mouseY)
     {
         int storageIndex = cellIndexAt(host, mouseX, mouseY);
         if (storageIndex < 0)
@@ -431,12 +404,12 @@ public final class SidebarRenderer
         }
 
         int visualIndex = storageIndex - ClientStorageState.scrollRow() * SLOT_COLUMNS;
-        List<SidebarSlot> slots = host.bbd$getSidebarSlots();
+        List<NetworkStorageSlot> slots = host.bbd$getSidebarSlots();
         if (visualIndex < 0 || visualIndex >= slots.size())
         {
             return null;
         }
-        SidebarSlot slot = slots.get(visualIndex);
+        NetworkStorageSlot slot = slots.get(visualIndex);
         return slot.isActive() ? slot : null;
     }
 
