@@ -133,9 +133,9 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     private void bbd$sidebarClick(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> callbackInfo)
     {
         if (!bbd$isBeyondDimensionsScreen() && bbd$searchBox != null
-                && SidebarRenderer.handleClick(this, mouseX, mouseY, button))
+                && SidebarRenderer.handleMouseClick(this, mouseX, mouseY, button))
         {
-            bbd$consumeSidebarMouseRelease = true;
+            bbd$markSidebarMouseRelease();
             callbackInfo.setReturnValue(true);
         }
     }
@@ -143,9 +143,8 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Inject(method = "mouseReleased", at = @At("HEAD"), cancellable = true)
     private void bbd$sidebarRelease(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> callbackInfo)
     {
-        if (bbd$consumeSidebarMouseRelease)
+        if (bbd$consumeSidebarMouseRelease())
         {
-            bbd$consumeSidebarMouseRelease = false;
             callbackInfo.setReturnValue(true);
         }
     }
@@ -209,6 +208,20 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     public net.minecraft.world.item.ItemStack bbd$getCarried()
     {
         return menu.getCarried();
+    }
+
+    @Override
+    public void bbd$markSidebarMouseRelease()
+    {
+        bbd$consumeSidebarMouseRelease = true;
+    }
+
+    @Override
+    public boolean bbd$consumeSidebarMouseRelease()
+    {
+        boolean consume = bbd$consumeSidebarMouseRelease;
+        bbd$consumeSidebarMouseRelease = false;
+        return consume;
     }
 
     @Override
