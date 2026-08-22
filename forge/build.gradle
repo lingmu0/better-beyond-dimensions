@@ -160,6 +160,7 @@ dependencies {
     runtimeOnly fg.deobf('local.beyonddimensions:beyonddimensions-1.20.1-forge:0.7.27')
 
     // Test-environment-only JEI; it is not included in the published mod.
+    compileOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
     runtimeOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge:${jei_version}")
 
     // Example mod dependency with JEI - using fg.deobf() ensures the dependency is remapped to your development mappings
