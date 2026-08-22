@@ -63,13 +63,14 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         int secondButtonX = firstButtonX + buttonWidth + buttonGap;
         int firstButtonY = y + 20;
         int secondButtonY = firstButtonY + 15;
+        int searchHeight = Minecraft.getInstance().font.lineHeight + 5;
 
         bbd$searchBox = bbd$addRenderableWidget(new EditBox(
                 Minecraft.getInstance().font,
-                x + 4,
+                x + SidebarRenderer.SEARCH_LEFT,
                 y + 4,
-                SidebarRenderer.WIDTH - 8,
-                Minecraft.getInstance().font.lineHeight + 5,
+                SidebarRenderer.getSearchWidth(),
+                searchHeight,
                 Component.translatable("wintercogs.beyonddimensions.dimensionsguisearch")
         ));
         bbd$searchBox.setMaxLength(200);
@@ -102,7 +103,8 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
                 .bounds(secondButtonX, secondButtonY, buttonWidth, 14).build());
         bbd$depositPlayerButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.deposit_player")));
         bbd$sidebarToggleButton = bbd$addRenderableWidget(Button.builder(Component.literal("×"), button -> bbd$toggleSidebar())
-                .bounds(x + SidebarRenderer.WIDTH - 15, y + 2, 12, 12).build());
+                .bounds(SidebarRenderer.getToggleX(x), y + 4,
+                        SidebarRenderer.TOGGLE_WIDTH, searchHeight).build());
         bbd$sidebarToggleButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.hide_sidebar")));
         bbd$scrollWidget = bbd$addRenderableWidget(new net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget(
                 this,
@@ -283,7 +285,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Override
     public int bbd$getSidebarY()
     {
-        return Math.max(4, topPos + 3);
+        return Math.max(4, topPos - 5);
     }
 
     @Override
