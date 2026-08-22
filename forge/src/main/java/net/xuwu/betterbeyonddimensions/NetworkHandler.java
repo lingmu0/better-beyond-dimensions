@@ -57,6 +57,11 @@ public final class NetworkHandler
                 buffer -> new DepositPacket(buffer.readVarInt()),
                 NetworkHandler::handleDeposit,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, QuickMovePacket.class,
+                (packet, buffer) -> buffer.writeVarInt(packet.slotId),
+                buffer -> new QuickMovePacket(buffer.readVarInt()),
+                NetworkHandler::handleQuickMove,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
         CHANNEL.registerMessage(nextId++, WithdrawPacket.class,
                 (packet, buffer) -> {
                     buffer.writeItem(packet.stack);
@@ -69,10 +74,16 @@ public final class NetworkHandler
                 (packet, buffer) -> {
                     buffer.writeItem(packet.stack);
                     buffer.writeVarInt(packet.button);
+                    buffer.writeItem(packet.carried);
                 },
-                buffer -> new SidebarClickPacket(buffer.readItem(), buffer.readVarInt()),
+                buffer -> new SidebarClickPacket(buffer.readItem(), buffer.readVarInt(), buffer.readItem()),
                 NetworkHandler::handleSidebarClick,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, CursorPacket.class,
+                (packet, buffer) -> buffer.writeItem(packet.stack),
+                buffer -> new CursorPacket(buffer.readItem()),
+                NetworkHandler::handleCursor,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT));
     }
 
     public static void requestSnapshot()
@@ -100,6 +111,11 @@ public final class NetworkHandler
         CHANNEL.sendToServer(new DepositPacket(StorageActions.DEPOSIT_PLAYER_INVENTORY));
     }
 
+    public static void quickMove(int slotId)
+    {
+        CHANNEL.sendToServer(new QuickMovePacket(slotId));
+    }
+
     public static void withdraw(ItemStack stack, int amount)
     {
         ItemStack request = stack.copy();
@@ -109,12 +125,18 @@ public final class NetworkHandler
 
     public static void clickSidebar(ItemStack stack, int button)
     {
+        clickSidebar(stack, button, ItemStack.EMPTY);
+    }
+
+    public static void clickSidebar(ItemStack stack, int button, ItemStack carried)
+    {
         ItemStack request = stack == null ? ItemStack.EMPTY : stack.copy();
         if (!request.isEmpty())
         {
             request.setCount(1);
         }
-        CHANNEL.sendToServer(new SidebarClickPacket(request, button));
+        ItemStack carriedRequest = carried == null ? ItemStack.EMPTY : carried.copy();
+        CHANNEL.sendToServer(new SidebarClickPacket(request, button, carriedRequest));
     }
 
     private static void handleRequestSnapshot(RequestSnapshotPacket packet, Supplier<NetworkEvent.Context> contextSupplier)
@@ -188,6 +210,20 @@ public final class NetworkHandler
         context.setPacketHandled(true);
     }
 
+    private static void handleQuickMove(QuickMovePacket packet, Supplier<NetworkEvent.Context> contextSupplier)
+    {
+        NetworkEvent.Context context = contextSupplier.get();
+        context.enqueueWork(() -> {
+            ServerPlayer player = context.getSender();
+            if (player != null)
+            {
+                StorageActions.routeQuickMove(player, player.containerMenu, packet.slotId);
+                sendSnapshot(player);
+            }
+        });
+        context.setPacketHandled(true);
+    }
+
     private static void handleSidebarClick(SidebarClickPacket packet, Supplier<NetworkEvent.Context> contextSupplier)
     {
         NetworkEvent.Context context = contextSupplier.get();
@@ -195,16 +231,33 @@ public final class NetworkHandler
             ServerPlayer player = context.getSender();
             if (player != null)
             {
-                StorageActions.clickSidebar(player, packet.stack, packet.button);
+                StorageActions.clickSidebar(player, packet.stack, packet.button, packet.carried);
+                if (player.isCreative())
+                {
+                    sendCarried(player);
+                }
                 sendSnapshot(player);
             }
         });
         context.setPacketHandled(true);
     }
 
+    private static void handleCursor(CursorPacket packet, Supplier<NetworkEvent.Context> contextSupplier)
+    {
+        NetworkEvent.Context context = contextSupplier.get();
+        context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                () -> () -> ClientStorageState.setCarried(packet.stack)));
+        context.setPacketHandled(true);
+    }
+
     public static void sendSnapshot(ServerPlayer player)
     {
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SnapshotPacket(NetworkStorage.snapshot(player)));
+    }
+
+    private static void sendCarried(ServerPlayer player)
+    {
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new CursorPacket(player.containerMenu.getCarried().copy()));
     }
 
     private static void encodeSnapshot(SnapshotPacket packet, FriendlyByteBuf buffer)
@@ -273,6 +326,16 @@ public final class NetworkHandler
         }
     }
 
+    private static final class QuickMovePacket
+    {
+        private final int slotId;
+
+        private QuickMovePacket(int slotId)
+        {
+            this.slotId = slotId;
+        }
+    }
+
     private static final class WithdrawPacket
     {
         private final ItemStack stack;
@@ -289,11 +352,23 @@ public final class NetworkHandler
     {
         private final ItemStack stack;
         private final int button;
+        private final ItemStack carried;
 
-        private SidebarClickPacket(ItemStack stack, int button)
+        private SidebarClickPacket(ItemStack stack, int button, ItemStack carried)
         {
             this.stack = stack;
             this.button = button;
+            this.carried = carried;
+        }
+    }
+
+    private static final class CursorPacket
+    {
+        private final ItemStack stack;
+
+        private CursorPacket(ItemStack stack)
+        {
+            this.stack = stack;
         }
     }
 }

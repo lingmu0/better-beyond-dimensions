@@ -118,12 +118,12 @@ public final class SidebarRenderer
                 : ItemStack.EMPTY;
         if (Screen.hasShiftDown() && !stack.isEmpty() && index < entries.size())
         {
-            long amount = Math.min((long) Integer.MAX_VALUE, Math.max(1L, entries.get(index).amount()));
+            long amount = Math.min(entries.get(index).amount(), Math.max(1, stack.getMaxStackSize()));
             NetworkHandler.withdraw(stack, (int) amount);
         }
         else
         {
-            NetworkHandler.clickSidebar(stack, button);
+            NetworkHandler.clickSidebar(stack, button, host.bbd$getCarried());
         }
         return true;
     }
@@ -138,12 +138,19 @@ public final class SidebarRenderer
 
         if (search.visible && search.active && search.isMouseOver(mouseX, mouseY))
         {
-            if (button == 1)
+            if (button == 0 || button == 1)
             {
                 Screen screen = (Screen) (Object) host;
                 screen.setFocused(search);
                 search.setFocused(true);
-                search.setValue("");
+                if (button == 0)
+                {
+                    search.mouseClicked(mouseX, mouseY, button);
+                }
+                else
+                {
+                    search.setValue("");
+                }
                 return true;
             }
             return false;

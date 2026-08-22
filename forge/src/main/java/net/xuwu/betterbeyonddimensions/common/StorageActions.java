@@ -176,6 +176,12 @@ public final class StorageActions
      */
     public static void clickSidebar(ServerPlayer player, ItemStack requestedStack, int button)
     {
+        clickSidebar(player, requestedStack, button, ItemStack.EMPTY);
+    }
+
+    public static void clickSidebar(ServerPlayer player, ItemStack requestedStack, int button,
+                                    ItemStack clientCarried)
+    {
         if (button != 0 && button != 1)
         {
             return;
@@ -203,6 +209,10 @@ public final class StorageActions
         }
 
         ItemStack carried = player.containerMenu.getCarried().copy();
+        if (player.isCreative() && clientCarried != null && !clientCarried.isEmpty())
+        {
+            carried = clientCarried.copy();
+        }
         if (carried.isEmpty())
         {
             if (clickedKey == null || clicked == null)
