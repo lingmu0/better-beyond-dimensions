@@ -202,9 +202,7 @@ public final class SidebarRenderer
         for (int row = 0; row < rows; row++)
         {
             int rowY = y + GRID_TOP + row * CommonTextures.COMMON_SLOTS_HEIGHT;
-            blitCropped(graphics, CommonTextures.COMMON_SLOTS, x, rowY,
-                    CommonTextures.COMMON_SLOTS_HEIGHT, CommonTextures.COMMON_SLOTS_WIDTH,
-                    CommonTextures.COMMON_SLOTS_HEIGHT);
+            blitSlotRow(graphics, x, rowY);
         }
 
         int bottomY = y + GRID_TOP + rows * CommonTextures.COMMON_SLOTS_HEIGHT;
@@ -221,6 +219,22 @@ public final class SidebarRenderer
         graphics.blit(texture, x, y, 0, 0, bodyWidth, height, textureWidth, textureHeight);
         graphics.blit(texture, x + bodyWidth, y, textureWidth - edgeWidth, 0,
                 edgeWidth, height, textureWidth, textureHeight);
+    }
+
+    private static void blitSlotRow(GuiGraphics graphics, int x, int y)
+    {
+        // COMMON_SLOTS is a nine-slot row: 7px left border, nine 18px cells, 7px right border.
+        // Rebuild the row so the five visible cells do not expose a partial sixth cell.
+        int borderWidth = 7;
+        int cellsWidth = SLOT_COLUMNS * 18;
+        int textureWidth = CommonTextures.COMMON_SLOTS_WIDTH;
+        int textureHeight = CommonTextures.COMMON_SLOTS_HEIGHT;
+        graphics.blit(CommonTextures.COMMON_SLOTS, x, y, 0, 0,
+                borderWidth, textureHeight, textureWidth, textureHeight);
+        graphics.blit(CommonTextures.COMMON_SLOTS, x + borderWidth, y, borderWidth, 0,
+                cellsWidth, textureHeight, textureWidth, textureHeight);
+        graphics.blit(CommonTextures.COMMON_SLOTS, x + borderWidth + cellsWidth, y,
+                textureWidth - borderWidth, 0, borderWidth, textureHeight, textureWidth, textureHeight);
     }
 
     private static void syncWidgets(SidebarScreenAccess host)
