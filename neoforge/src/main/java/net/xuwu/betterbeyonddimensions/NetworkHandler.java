@@ -87,12 +87,12 @@ public final class NetworkHandler
         String networkName = buffer.readUtf(256);
         boolean shiftPlayer = buffer.readBoolean();
         boolean shiftContainer = buffer.readBoolean();
-        int count = Math.min(128, Math.max(0, buffer.readVarInt()));
+        int count = Math.min(512, Math.max(0, buffer.readVarInt()));
         List<StorageEntry> entries = new ArrayList<>(count);
         for (int index = 0; index < count; index++)
         {
             ItemStack stack = ItemStack.OPTIONAL_STREAM_CODEC.decode(buffer);
-            entries.add(new StorageEntry(stack, buffer.readLong()));
+            entries.add(new StorageEntry(stack, buffer.readLong(), buffer.readLong(), buffer.readLong()));
         }
         return new StorageSnapshot(available, networkName, shiftPlayer, shiftContainer, entries);
     }
@@ -108,6 +108,8 @@ public final class NetworkHandler
         {
             ItemStack.OPTIONAL_STREAM_CODEC.encode(buffer, entry.stack());
             buffer.writeLong(entry.amount());
+            buffer.writeLong(entry.insertedTime());
+            buffer.writeLong(entry.modifiedTime());
         }
     }
 

@@ -187,6 +187,8 @@ public final class NetworkHandler
         {
             buffer.writeItem(entry.stack());
             buffer.writeLong(entry.amount());
+            buffer.writeLong(entry.insertedTime());
+            buffer.writeLong(entry.modifiedTime());
         }
     }
 
@@ -196,11 +198,11 @@ public final class NetworkHandler
         String networkName = buffer.readUtf(256);
         boolean shiftPlayer = buffer.readBoolean();
         boolean shiftContainer = buffer.readBoolean();
-        int count = Math.min(128, Math.max(0, buffer.readVarInt()));
+        int count = Math.min(512, Math.max(0, buffer.readVarInt()));
         List<StorageEntry> entries = new ArrayList<>(count);
         for (int index = 0; index < count; index++)
         {
-            entries.add(new StorageEntry(buffer.readItem(), buffer.readLong()));
+            entries.add(new StorageEntry(buffer.readItem(), buffer.readLong(), buffer.readLong(), buffer.readLong()));
         }
         return new SnapshotPacket(new StorageSnapshot(available, networkName, shiftPlayer, shiftContainer, entries));
     }
