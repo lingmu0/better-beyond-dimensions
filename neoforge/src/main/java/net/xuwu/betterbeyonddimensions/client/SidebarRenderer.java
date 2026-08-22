@@ -61,6 +61,7 @@ public final class SidebarRenderer
         StorageSnapshot snapshot = ClientStorageState.snapshot();
         if (!snapshot.available())
         {
+            host.bbd$updateSidebarSlots(List.of());
             setWidgetsVisible(host, false);
             return;
         }
