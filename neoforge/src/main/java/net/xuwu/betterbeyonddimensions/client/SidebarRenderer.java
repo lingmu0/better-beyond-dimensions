@@ -123,7 +123,7 @@ public final class SidebarRenderer
         }
         else
         {
-            NetworkHandler.clickSidebar(stack, button);
+            NetworkHandler.clickSidebar(stack, button, host.bbd$getCarried());
         }
         return true;
     }
