@@ -40,14 +40,10 @@ public final class NetworkHandler
                 new DirectionalPayloadHandler<>(TogglePacket::handle, TogglePacket::handle));
         registrar.playBidirectional(DepositPacket.TYPE, DepositPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(DepositPacket::handle, DepositPacket::handle));
-        registrar.playBidirectional(QuickMovePacket.TYPE, QuickMovePacket.STREAM_CODEC,
-                new DirectionalPayloadHandler<>(QuickMovePacket::handle, QuickMovePacket::handle));
         registrar.playBidirectional(WithdrawPacket.TYPE, WithdrawPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(WithdrawPacket::handle, WithdrawPacket::handle));
         registrar.playBidirectional(SidebarClickPacket.TYPE, SidebarClickPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(SidebarClickPacket::handle, SidebarClickPacket::handle));
-        registrar.playBidirectional(CursorPacket.TYPE, CursorPacket.STREAM_CODEC,
-                new DirectionalPayloadHandler<>(CursorPacket::handle, CursorPacket::handle));
     }
 
     public static void requestSnapshot()
@@ -75,11 +71,6 @@ public final class NetworkHandler
         PacketDistributor.sendToServer(new DepositPacket(StorageActions.DEPOSIT_PLAYER_INVENTORY));
     }
 
-    public static void quickMove(int slotId)
-    {
-        PacketDistributor.sendToServer(new QuickMovePacket(slotId));
-    }
-
     public static void withdraw(ItemStack stack, int amount)
     {
         ItemStack request = stack.copy();
@@ -89,28 +80,17 @@ public final class NetworkHandler
 
     public static void clickSidebar(ItemStack stack, int button)
     {
-        clickSidebar(stack, button, ItemStack.EMPTY);
-    }
-
-    public static void clickSidebar(ItemStack stack, int button, ItemStack carried)
-    {
         ItemStack request = stack == null ? ItemStack.EMPTY : stack.copy();
         if (!request.isEmpty())
         {
             request.setCount(1);
         }
-        ItemStack carriedRequest = carried == null ? ItemStack.EMPTY : carried.copy();
-        PacketDistributor.sendToServer(new SidebarClickPacket(request, button, carriedRequest));
+        PacketDistributor.sendToServer(new SidebarClickPacket(request, button));
     }
 
     public static void sendSnapshot(ServerPlayer player)
     {
         PacketDistributor.sendToPlayer(player, new SnapshotPacket(NetworkStorage.snapshot(player)));
-    }
-
-    private static void sendCarried(ServerPlayer player)
-    {
-        PacketDistributor.sendToPlayer(player, new CursorPacket(player.containerMenu.getCarried().copy()));
     }
 
     private static StorageSnapshot readSnapshot(RegistryFriendlyByteBuf buffer)
@@ -265,33 +245,6 @@ public final class NetworkHandler
         }
     }
 
-    private record QuickMovePacket(int slotId) implements CustomPacketPayload
-    {
-        private static final Type<QuickMovePacket> TYPE = new Type<>(BetterBeyondDimensions.id("quick_move"));
-        private static final StreamCodec<RegistryFriendlyByteBuf, QuickMovePacket> STREAM_CODEC =
-                StreamCodec.composite(ByteBufCodecs.VAR_INT, QuickMovePacket::slotId, QuickMovePacket::new);
-
-        private static void handle(QuickMovePacket packet, IPayloadContext context)
-        {
-            if (context.flow() == PacketFlow.SERVERBOUND)
-            {
-                context.enqueueWork(() -> {
-                    if (context.player() instanceof ServerPlayer player)
-                    {
-                        StorageActions.routeQuickMove(player, player.containerMenu, packet.slotId);
-                        sendSnapshot(player);
-                    }
-                });
-            }
-        }
-
-        @Override
-        public Type<? extends CustomPacketPayload> type()
-        {
-            return TYPE;
-        }
-    }
-
     private record WithdrawPacket(ItemStack stack, int amount) implements CustomPacketPayload
     {
         private static final Type<WithdrawPacket> TYPE = new Type<>(BetterBeyondDimensions.id("withdraw"));
@@ -324,7 +277,7 @@ public final class NetworkHandler
         }
     }
 
-    private record SidebarClickPacket(ItemStack stack, int button, ItemStack carried) implements CustomPacketPayload
+    private record SidebarClickPacket(ItemStack stack, int button) implements CustomPacketPayload
     {
         private static final Type<SidebarClickPacket> TYPE = new Type<>(BetterBeyondDimensions.id("sidebar_click"));
         private static final StreamCodec<RegistryFriendlyByteBuf, SidebarClickPacket> STREAM_CODEC = StreamCodec.composite(
@@ -332,8 +285,6 @@ public final class NetworkHandler
                 SidebarClickPacket::stack,
                 ByteBufCodecs.VAR_INT,
                 SidebarClickPacket::button,
-                ItemStack.OPTIONAL_STREAM_CODEC,
-                SidebarClickPacket::carried,
                 SidebarClickPacket::new
         );
 
@@ -344,11 +295,7 @@ public final class NetworkHandler
                 context.enqueueWork(() -> {
                     if (context.player() instanceof ServerPlayer player)
                     {
-                        StorageActions.clickSidebar(player, packet.stack, packet.button, packet.carried);
-                        if (player.isCreative())
-                        {
-                            sendCarried(player);
-                        }
+                        StorageActions.clickSidebar(player, packet.stack, packet.button);
                         sendSnapshot(player);
                     }
                 });
@@ -362,24 +309,4 @@ public final class NetworkHandler
         }
     }
 
-    private record CursorPacket(ItemStack stack) implements CustomPacketPayload
-    {
-        private static final Type<CursorPacket> TYPE = new Type<>(BetterBeyondDimensions.id("cursor"));
-        private static final StreamCodec<RegistryFriendlyByteBuf, CursorPacket> STREAM_CODEC =
-                StreamCodec.composite(ItemStack.OPTIONAL_STREAM_CODEC, CursorPacket::stack, CursorPacket::new);
-
-        private static void handle(CursorPacket packet, IPayloadContext context)
-        {
-            if (context.flow() == PacketFlow.CLIENTBOUND)
-            {
-                context.enqueueWork(() -> ClientStorageState.setCarried(packet.stack));
-            }
-        }
-
-        @Override
-        public Type<? extends CustomPacketPayload> type()
-        {
-            return TYPE;
-        }
-    }
 }

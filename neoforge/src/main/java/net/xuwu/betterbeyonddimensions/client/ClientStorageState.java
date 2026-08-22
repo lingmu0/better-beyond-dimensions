@@ -1,7 +1,5 @@
 package net.xuwu.betterbeyonddimensions.client;
 
-import net.minecraft.client.Minecraft;
-import net.minecraft.world.item.ItemStack;
 import net.xuwu.betterbeyonddimensions.common.StorageEntry;
 import net.xuwu.betterbeyonddimensions.common.StorageSnapshot;
 
@@ -59,12 +57,4 @@ public final class ClientStorageState
         scrollRow = 0;
     }
 
-    public static void setCarried(ItemStack carried)
-    {
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player != null && minecraft.player.containerMenu != null)
-        {
-            minecraft.player.containerMenu.setCarried(carried == null ? ItemStack.EMPTY : carried.copy());
-        }
-    }
 }

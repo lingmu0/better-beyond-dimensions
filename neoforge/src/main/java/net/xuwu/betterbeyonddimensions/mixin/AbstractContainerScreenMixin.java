@@ -7,6 +7,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
@@ -50,7 +51,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Inject(method = "init", at = @At("TAIL"))
     private void bbd$initSidebar(CallbackInfo callbackInfo)
     {
-        if (bbd$isBeyondDimensionsScreen())
+        if (bbd$isSidebarExcludedScreen())
         {
             ClientStorageState.clear();
             return;
@@ -127,7 +128,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Inject(method = "render", at = @At("HEAD"))
     private void bbd$prepareSidebarSlots(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo callbackInfo)
     {
-        if (!bbd$isBeyondDimensionsScreen() && bbd$searchBox != null)
+        if (!bbd$isSidebarExcludedScreen() && bbd$searchBox != null)
         {
             bbd$rebuildSidebarSlots();
             SidebarRenderer.prepareSlots(this);
@@ -160,7 +161,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Inject(method = "render", at = @At("TAIL"))
     private void bbd$renderSidebar(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo callbackInfo)
     {
-        if (!bbd$isBeyondDimensionsScreen() && bbd$searchBox != null)
+        if (!bbd$isSidebarExcludedScreen() && bbd$searchBox != null)
         {
             bbd$rebuildSidebarSlots();
             SidebarRenderer.render(this, graphics, mouseX, mouseY, partialTick);
@@ -171,7 +172,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
     private void bbd$sidebarClick(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> callbackInfo)
     {
-        if (!bbd$isBeyondDimensionsScreen() && bbd$searchBox != null
+        if (!bbd$isSidebarExcludedScreen() && bbd$searchBox != null
                 && SidebarRenderer.handleMouseClick(this, mouseX, mouseY, button))
         {
             bbd$markSidebarMouseRelease();
@@ -189,9 +190,10 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     }
 
     @Unique
-    private boolean bbd$isBeyondDimensionsScreen()
+    private boolean bbd$isSidebarExcludedScreen()
     {
-        return this.getClass().getName().startsWith("com.wintercogs.beyonddimensions.");
+        return this.getClass().getName().startsWith("com.wintercogs.beyonddimensions.")
+                || (Object) this instanceof CreativeModeInventoryScreen;
     }
 
     @Unique
@@ -315,7 +317,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Override
     public void bbd$rebuildSidebarSlots()
     {
-        if (menu == null || bbd$isBeyondDimensionsScreen())
+        if (menu == null || bbd$isSidebarExcludedScreen())
         {
             return;
         }
@@ -358,41 +360,4 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         }
     }
 
-    @Override
-    public boolean bbd$handleCreativePlayerQuickMove(double mouseX, double mouseY)
-    {
-        if (!ClientStorageState.available()
-                || !ClientStorageState.snapshot().shiftPlayerInventory()
-                || !menu.getCarried().isEmpty())
-        {
-            return false;
-        }
-
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.player == null)
-        {
-            return false;
-        }
-
-        for (net.minecraft.world.inventory.Slot slot : menu.slots)
-        {
-            if (slot instanceof SidebarSlot
-                    || slot.container != minecraft.player.getInventory()
-                    || !slot.isActive())
-            {
-                continue;
-            }
-
-            double localX = mouseX - leftPos;
-            double localY = mouseY - topPos;
-            if (localX >= slot.x - 1 && localX < slot.x + 17
-                    && localY >= slot.y - 1 && localY < slot.y + 17
-                    && slot.hasItem() && slot.mayPickup(minecraft.player))
-            {
-                NetworkHandler.quickMove(slot.index);
-                return true;
-            }
-        }
-        return false;
-    }
 }

@@ -167,7 +167,7 @@ public final class SidebarRenderer
         }
         else
         {
-            NetworkHandler.clickSidebar(stack, button, host.bbd$getCarried());
+            NetworkHandler.clickSidebar(stack, button);
         }
         return true;
     }

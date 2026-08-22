@@ -9,8 +9,7 @@
   "client": [
     "ScreenWidgetAccessor",
     "AbstractContainerMenuAccessor",
-    "AbstractContainerScreenMixin",
-    "CreativeModeInventoryScreenMixin"
+    "AbstractContainerScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1
