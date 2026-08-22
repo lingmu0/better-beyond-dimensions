@@ -112,7 +112,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
                 x + 7,
                 y + SidebarRenderer.getGridTop(),
                 SidebarRenderer.WIDTH - 14,
-                Math.max(18, SidebarRenderer.getPanelHeight(this) - SidebarRenderer.getGridTop() - 7)
+                Math.max(18, SidebarRenderer.getPanelHeight() - SidebarRenderer.getGridTop() - 7)
         ));
 
         bbd$rebuildSidebarSlots();
@@ -297,7 +297,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Override
     public int bbd$getSidebarY()
     {
-        return Math.max(4, topPos - 5);
+        return Math.max(4, topPos + 1);
     }
 
     @Override

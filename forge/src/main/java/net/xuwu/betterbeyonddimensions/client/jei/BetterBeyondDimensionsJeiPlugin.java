@@ -45,7 +45,7 @@ public final class BetterBeyondDimensionsJeiPlugin implements IModPlugin
                                 access.bbd$getSidebarX(),
                                 access.bbd$getSidebarY(),
                                 SidebarRenderer.WIDTH,
-                                SidebarRenderer.getPanelHeight(access)
+                                SidebarRenderer.getPanelHeight()
                         ));
                     }
                 });
