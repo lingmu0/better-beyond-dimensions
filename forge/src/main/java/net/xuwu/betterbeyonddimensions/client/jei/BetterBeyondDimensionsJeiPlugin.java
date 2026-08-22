@@ -35,6 +35,7 @@ public final class BetterBeyondDimensionsJeiPlugin implements IModPlugin
                     {
                         if (!(screen instanceof SidebarScreenAccess access)
                                 || access.bbd$getSearchBox() == null
+                                || access.bbd$isSidebarHidden()
                                 || !ClientStorageState.available())
                         {
                             return List.of();

@@ -8,6 +8,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -56,6 +57,21 @@ public final class SidebarRenderer
         return visibleRows();
     }
 
+    /** Updates the real menu Slots before vanilla starts rendering its container slots. */
+    public static void prepareSlots(SidebarScreenAccess host)
+    {
+        if (!ClientStorageState.available() || host.bbd$isSidebarHidden())
+        {
+            host.bbd$updateSidebarSlots(List.of());
+            return;
+        }
+
+        List<ClientStorageView.Entry> entries = entries(host);
+        StorageSnapshot snapshot = ClientStorageState.snapshot();
+        syncScrollState(snapshot, host.bbd$getSearchBox().getValue(), entries.size());
+        host.bbd$updateSidebarSlots(entries);
+    }
+
     public static void render(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY, float partialTick)
     {
         StorageSnapshot snapshot = ClientStorageState.snapshot();
@@ -63,10 +79,19 @@ public final class SidebarRenderer
         {
             host.bbd$updateSidebarSlots(List.of());
             setWidgetsVisible(host, false);
+            host.bbd$getSidebarToggleButton().visible = false;
+            host.bbd$getSidebarToggleButton().active = false;
             return;
         }
 
         syncWidgets(host);
+        if (host.bbd$isSidebarHidden())
+        {
+            host.bbd$updateSidebarSlots(List.of());
+            renderWidgets(host, graphics, mouseX, mouseY, partialTick);
+            return;
+        }
+
         List<ClientStorageView.Entry> entries = entries(host);
         int rows = visibleRows();
         syncScrollState(snapshot, host.bbd$getSearchBox().getValue(), entries.size());
@@ -108,7 +133,7 @@ public final class SidebarRenderer
 
     public static boolean handleClick(SidebarScreenAccess host, double mouseX, double mouseY, int button)
     {
-        if (!ClientStorageState.available() || (button != 0 && button != 1))
+        if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || (button != 0 && button != 1))
         {
             return false;
         }
@@ -172,7 +197,7 @@ public final class SidebarRenderer
 
     public static boolean handleScroll(SidebarScreenAccess host, double mouseX, double mouseY, double scrollAmount)
     {
-        if (!ClientStorageState.available() || scrollAmount == 0.0D)
+        if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || scrollAmount == 0.0D)
         {
             return false;
         }
@@ -197,7 +222,7 @@ public final class SidebarRenderer
     public static void renderTooltip(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY)
     {
         renderButtonTooltip(host, mouseX, mouseY);
-        if (!ClientStorageState.available() || !host.bbd$getCarried().isEmpty())
+        if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || !host.bbd$getCarried().isEmpty())
         {
             return;
         }
@@ -224,7 +249,8 @@ public final class SidebarRenderer
                 host.bbd$getPlayerShiftButton(),
                 host.bbd$getContainerShiftButton(),
                 host.bbd$getDepositContainerButton(),
-                host.bbd$getDepositPlayerButton()
+                host.bbd$getDepositPlayerButton(),
+                host.bbd$getSidebarToggleButton()
         };
         for (Button button : buttons)
         {
@@ -304,7 +330,15 @@ public final class SidebarRenderer
 
     private static void syncWidgets(SidebarScreenAccess host)
     {
-        setWidgetsVisible(host, true);
+        boolean visible = !host.bbd$isSidebarHidden();
+        setWidgetsVisible(host, visible);
+        Button toggle = host.bbd$getSidebarToggleButton();
+        toggle.visible = true;
+        toggle.active = true;
+        toggle.setMessage(Component.literal(host.bbd$isSidebarHidden() ? "+" : "×"));
+        toggle.setTooltip(Tooltip.create(Component.translatable(host.bbd$isSidebarHidden()
+                ? "better_beyond_dimensions.tooltip.show_sidebar"
+                : "better_beyond_dimensions.tooltip.hide_sidebar")));
         StorageSnapshot snapshot = ClientStorageState.snapshot();
         boolean player = snapshot.shiftPlayerInventory();
         boolean container = snapshot.shiftContainer();
@@ -337,6 +371,11 @@ public final class SidebarRenderer
 
     private static void renderWidgets(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY, float partialTick)
     {
+        host.bbd$getSidebarToggleButton().render(graphics, mouseX, mouseY, partialTick);
+        if (host.bbd$isSidebarHidden())
+        {
+            return;
+        }
         host.bbd$getSearchBox().render(graphics, mouseX, mouseY, partialTick);
         host.bbd$getPlayerShiftButton().render(graphics, mouseX, mouseY, partialTick);
         host.bbd$getContainerShiftButton().render(graphics, mouseX, mouseY, partialTick);

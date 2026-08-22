@@ -49,6 +49,11 @@ public final class ClientStorageView
 
         if (snapshotChanged || searchChanged || sortChanged)
         {
+            // ClientNetStorage keeps its own filtered entries and sorted-index cache.  Clear
+            // both layers before rebuilding so a key removed by a new server snapshot cannot
+            // survive in a previously rendered cell.
+            filteredStorage.clearStorage();
+            orderedEntries = List.of();
             loadedSearch = normalizedSearch;
             loadedPrimarySort = CommonConfigRuntime.uiSortButton;
             loadedSecondarySort = CommonConfigRuntime.uiSecondSortButton;
@@ -93,6 +98,8 @@ public final class ClientStorageView
     private void loadSnapshot(StorageSnapshot snapshot)
     {
         loadedSnapshot = snapshot;
+        orderedEntries = List.of();
+        filteredStorage.clearStorage();
         sourceStorage.clearStorage();
 
         if (snapshot == null || !snapshot.available())
