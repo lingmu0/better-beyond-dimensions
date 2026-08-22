@@ -25,7 +25,7 @@ public final class SidebarRenderer
 
     private static final int GRID_TOP = CommonTextures.TOP_BASE_COMMON_HEIGHT
             + CommonTextures.COMMON_CONNECTION_HEIGHT
-            + 16;
+            + 18;
     private static final int MAX_VISIBLE_ROWS = 8;
 
     private static final ClientStorageView STORAGE_VIEW = new ClientStorageView();

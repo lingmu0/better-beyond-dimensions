@@ -49,8 +49,12 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
 
         int x = bbd$getSidebarX();
         int y = bbd$getSidebarY();
-        int buttonWidth = (SidebarRenderer.WIDTH - 8 - 3) / 4;
-        int buttonGap = 1;
+        int buttonGap = 3;
+        int buttonWidth = (SidebarRenderer.WIDTH - 7 - buttonGap) / 2;
+        int firstButtonX = x + 3;
+        int secondButtonX = firstButtonX + buttonWidth + buttonGap;
+        int firstButtonY = y + 20;
+        int secondButtonY = firstButtonY + 15;
 
         bbd$searchBox = bbd$addRenderableWidget(new EditBox(
                 Minecraft.getInstance().font,
@@ -78,16 +82,16 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         bbd$searchBox.setValue(CommonConfigRuntime.uiSearch);
 
         bbd$playerShiftButton = bbd$addRenderableWidget(Button.builder(Component.literal("人×"), button -> NetworkHandler.togglePlayerShift())
-                .bounds(x + 3, y + 33, buttonWidth, 14).build());
+                .bounds(firstButtonX, firstButtonY, buttonWidth, 14).build());
         bbd$playerShiftButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.shift_player")));
         bbd$containerShiftButton = bbd$addRenderableWidget(Button.builder(Component.literal("箱×"), button -> NetworkHandler.toggleContainerShift())
-                .bounds(x + 3 + buttonWidth + buttonGap, y + 33, buttonWidth, 14).build());
+                .bounds(secondButtonX, firstButtonY, buttonWidth, 14).build());
         bbd$containerShiftButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.shift_container")));
         bbd$depositContainerButton = bbd$addRenderableWidget(Button.builder(Component.literal("存箱"), button -> NetworkHandler.depositContainer())
-                .bounds(x + 3 + (buttonWidth + buttonGap) * 2, y + 33, buttonWidth, 14).build());
+                .bounds(firstButtonX, secondButtonY, buttonWidth, 14).build());
         bbd$depositContainerButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.deposit_container")));
         bbd$depositPlayerButton = bbd$addRenderableWidget(Button.builder(Component.literal("存包"), button -> NetworkHandler.depositPlayerInventory())
-                .bounds(x + 3 + (buttonWidth + buttonGap) * 3, y + 33, buttonWidth, 14).build());
+                .bounds(secondButtonX, secondButtonY, buttonWidth, 14).build());
         bbd$depositPlayerButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.deposit_player")));
         bbd$scrollWidget = bbd$addRenderableWidget(new net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget(
                 this,
