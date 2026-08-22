@@ -65,6 +65,14 @@ public final class NetworkHandler
                 buffer -> new WithdrawPacket(buffer.readItem(), buffer.readVarInt()),
                 NetworkHandler::handleWithdraw,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, SidebarClickPacket.class,
+                (packet, buffer) -> {
+                    buffer.writeItem(packet.stack);
+                    buffer.writeVarInt(packet.button);
+                },
+                buffer -> new SidebarClickPacket(buffer.readItem(), buffer.readVarInt()),
+                NetworkHandler::handleSidebarClick,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
     }
 
     public static void requestSnapshot()
@@ -97,6 +105,16 @@ public final class NetworkHandler
         ItemStack request = stack.copy();
         request.setCount(1);
         CHANNEL.sendToServer(new WithdrawPacket(request, Math.max(1, amount)));
+    }
+
+    public static void clickSidebar(ItemStack stack, int button)
+    {
+        ItemStack request = stack == null ? ItemStack.EMPTY : stack.copy();
+        if (!request.isEmpty())
+        {
+            request.setCount(1);
+        }
+        CHANNEL.sendToServer(new SidebarClickPacket(request, button));
     }
 
     private static void handleRequestSnapshot(RequestSnapshotPacket packet, Supplier<NetworkEvent.Context> contextSupplier)
@@ -164,6 +182,20 @@ public final class NetworkHandler
             if (player != null)
             {
                 StorageActions.withdraw(player, packet.stack, packet.amount);
+                sendSnapshot(player);
+            }
+        });
+        context.setPacketHandled(true);
+    }
+
+    private static void handleSidebarClick(SidebarClickPacket packet, Supplier<NetworkEvent.Context> contextSupplier)
+    {
+        NetworkEvent.Context context = contextSupplier.get();
+        context.enqueueWork(() -> {
+            ServerPlayer player = context.getSender();
+            if (player != null)
+            {
+                StorageActions.clickSidebar(player, packet.stack, packet.button);
                 sendSnapshot(player);
             }
         });
@@ -250,6 +282,18 @@ public final class NetworkHandler
         {
             this.stack = stack;
             this.amount = amount;
+        }
+    }
+
+    private static final class SidebarClickPacket
+    {
+        private final ItemStack stack;
+        private final int button;
+
+        private SidebarClickPacket(ItemStack stack, int button)
+        {
+            this.stack = stack;
+            this.button = button;
         }
     }
 }

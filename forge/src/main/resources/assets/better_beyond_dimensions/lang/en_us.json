@@ -4,5 +4,13 @@
   "better_beyond_dimensions.deposit_container": "Deposit container",
   "better_beyond_dimensions.deposit_player": "Deposit inventory",
   "better_beyond_dimensions.shift_player": "Player shift target",
-  "better_beyond_dimensions.shift_container": "Container shift target"
+  "better_beyond_dimensions.shift_container": "Container shift target",
+  "better_beyond_dimensions.button.shift_player": "P%s",
+  "better_beyond_dimensions.button.shift_container": "C%s",
+  "better_beyond_dimensions.button.deposit_container": "Put C",
+  "better_beyond_dimensions.button.deposit_player": "Put P",
+  "better_beyond_dimensions.tooltip.shift_player": "Shift-transfer player inventory items to the dimension network",
+  "better_beyond_dimensions.tooltip.shift_container": "Shift-transfer open container items to the dimension network",
+  "better_beyond_dimensions.tooltip.deposit_container": "Deposit all items from the open container into the dimension network",
+  "better_beyond_dimensions.tooltip.deposit_player": "Deposit the player inventory into the dimension network, excluding the hotbar"
 }

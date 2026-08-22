@@ -169,6 +169,112 @@ public final class StorageActions
         player.containerMenu.broadcastChanges();
     }
 
+    /**
+     * Handles the overlay storage slot using the same basic left/right rules as Beyond Dimensions.
+     * The server menu's carried stack is authoritative, so the cursor can continue into vanilla
+     * container slots after taking an item from the sidebar.
+     */
+    public static void clickSidebar(ServerPlayer player, ItemStack requestedStack, int button)
+    {
+        if (button != 0 && button != 1)
+        {
+            return;
+        }
+
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        if (network == null || player.containerMenu == null)
+        {
+            return;
+        }
+
+        UnifiedStorage storage = network.getUnifiedStorage();
+        ItemStack requested = requestedStack == null ? ItemStack.EMPTY : requestedStack.copy();
+        if (!requested.isEmpty())
+        {
+            requested.setCount(1);
+        }
+
+        ItemStackKey clickedKey = requested.isEmpty() ? null : new ItemStackKey(requested);
+        KeyAmount clicked = clickedKey == null ? null : storage.getStackByKey(clickedKey);
+        if (clicked != null && clicked.isEmpty())
+        {
+            clickedKey = null;
+            clicked = null;
+        }
+
+        ItemStack carried = player.containerMenu.getCarried().copy();
+        if (carried.isEmpty())
+        {
+            if (clickedKey == null || clicked == null)
+            {
+                return;
+            }
+
+            long maxStack = Math.max(1L, clickedKey.getVanillaMaxStackSize());
+            long requestedAmount = Math.min(clicked.amount(), maxStack);
+            long amount = button == 0 ? requestedAmount : (requestedAmount + 1L) / 2L;
+            KeyAmount extracted = storage.extract(clickedKey, amount, false, false);
+            if (extracted.key() instanceof ItemStackKey itemKey && extracted.amount() > 0L)
+            {
+                player.containerMenu.setCarried(itemKey.copyStackWithCount(extracted.amount()));
+            }
+        }
+        else
+        {
+            ItemStackKey carriedKey = new ItemStackKey(carried);
+            if (clickedKey == null || clicked == null || clickedKey.isSameTypeSameComponents(carriedKey))
+            {
+                insertCarried(storage, player, carried, carriedKey, button);
+            }
+            else if (button == 0
+                    && carried.getCount() <= carried.getMaxStackSize()
+                    && clicked.amount() <= clickedKey.getVanillaMaxStackSize())
+            {
+                // Match the native storage slot's left-click swap when both stacks fit one slot.
+                KeyAmount extracted = storage.extract(clickedKey, clicked.amount(), false, false);
+                if (extracted.key() instanceof ItemStackKey extractedKey && extracted.amount() > 0L)
+                {
+                    KeyAmount remaining = storage.insert(carriedKey, carried.getCount(), true);
+                    if (remaining.isEmpty())
+                    {
+                        storage.insert(carriedKey, carried.getCount(), false);
+                        player.containerMenu.setCarried(extractedKey.copyStackWithCount(extracted.amount()));
+                    }
+                    else
+                    {
+                        storage.insert(extracted.key(), extracted.amount(), false);
+                    }
+                }
+            }
+        }
+
+        player.containerMenu.broadcastChanges();
+    }
+
+    private static void insertCarried(UnifiedStorage storage, ServerPlayer player, ItemStack carried,
+                                      ItemStackKey carriedKey, int button)
+    {
+        long requestedAmount = button == 0 ? carried.getCount() : 1L;
+        KeyAmount remaining = storage.insert(carriedKey, requestedAmount, false);
+        long inserted = Math.max(0L, Math.min(requestedAmount, requestedAmount - remaining.amount()));
+        if (inserted <= 0L)
+        {
+            return;
+        }
+
+        long newCount = carried.getCount() - inserted;
+        if (newCount <= 0L)
+        {
+            player.containerMenu.setCarried(ItemStack.EMPTY);
+        }
+        else
+        {
+            ItemStack newCarried = carried.copy();
+            newCarried.setCount((int) newCount);
+            player.containerMenu.setCarried(newCarried);
+        }
+    }
+
     private static int depositStack(DimensionsNet network, ItemStack stack)
     {
         if (stack == null || stack.isEmpty())

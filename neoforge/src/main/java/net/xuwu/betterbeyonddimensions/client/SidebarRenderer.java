@@ -8,7 +8,9 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.xuwu.betterbeyonddimensions.NetworkHandler;
 import net.xuwu.betterbeyonddimensions.common.StorageSnapshot;
@@ -18,12 +20,12 @@ import java.util.List;
 /** Renders a compact Beyond Dimensions-style storage view beside vanilla container screens. */
 public final class SidebarRenderer
 {
-    public static final int WIDTH = CommonTextures.COMMON_SLOTS_WIDTH;
+    private static final int SLOT_COLUMNS = 5;
+    public static final int WIDTH = SLOT_COLUMNS * 18 + 14;
 
     private static final int GRID_TOP = CommonTextures.TOP_BASE_COMMON_HEIGHT
             + CommonTextures.COMMON_CONNECTION_HEIGHT
-            + 26;
-    private static final int SLOT_COLUMNS = 9;
+            + 16;
     private static final int MAX_VISIBLE_ROWS = 8;
 
     private static final ClientStorageView STORAGE_VIEW = new ClientStorageView();
@@ -42,6 +44,11 @@ public final class SidebarRenderer
     {
         return GRID_TOP + visibleRows() * CommonTextures.COMMON_SLOTS_HEIGHT
                 + CommonTextures.BOTTOM_BASE_COMMON_HEIGHT;
+    }
+
+    public static int getGridTop()
+    {
+        return GRID_TOP;
     }
 
     public static void render(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY, float partialTick)
@@ -72,22 +79,19 @@ public final class SidebarRenderer
             for (int col = 0; col < SLOT_COLUMNS; col++)
             {
                 int entryIndex = firstEntry + row * SLOT_COLUMNS + col;
-                if (entryIndex < 0 || entryIndex >= entries.size())
-                {
-                    continue;
-                }
-
-                ClientStorageView.Entry entry = entries.get(entryIndex);
                 int slotX = x + 8 + col * 18;
                 int slotY = y + GRID_TOP + row * 18 + 1;
                 if (isHovered(x, y, mouseX, mouseY, row, col))
                 {
                     graphics.fill(slotX, slotY, slotX + 16, slotY + 16, 0x80FFFFFF);
                 }
+                if (entryIndex < 0 || entryIndex >= entries.size())
+                {
+                    continue;
+                }
 
-                ItemStack stack = entry.key().getRenderStack();
-                graphics.renderFakeItem(stack, slotX, slotY);
-                graphics.renderItemDecorations(font, stack, slotX, slotY, "");
+                ClientStorageView.Entry entry = entries.get(entryIndex);
+                entry.key().getRender().render(graphics, entry.key(), slotX, slotY);
                 entry.key().getRender().renderAmount(graphics, entry.amount(), slotX, slotY);
             }
         }
@@ -103,16 +107,16 @@ public final class SidebarRenderer
         }
 
         List<ClientStorageView.Entry> entries = entries(host);
-        int index = entryIndexAt(host, mouseX, mouseY, entries.size());
+        int index = cellIndexAt(host, mouseX, mouseY);
         if (index < 0)
         {
             return false;
         }
 
-        ClientStorageView.Entry entry = entries.get(index);
-        int stackAmount = Math.max(1, entry.key().getRenderStack().getMaxStackSize());
-        int amount = button == 0 ? stackAmount : Math.max(1, (stackAmount + 1) / 2);
-        NetworkHandler.withdraw(entry.key().getRenderStack(), amount);
+        ItemStack stack = index < entries.size()
+                ? entries.get(index).key().getRenderStack()
+                : ItemStack.EMPTY;
+        NetworkHandler.clickSidebar(stack, button);
         return true;
     }
 
@@ -142,14 +146,15 @@ public final class SidebarRenderer
 
     public static void renderTooltip(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY)
     {
-        if (!ClientStorageState.available())
+        renderButtonTooltip(host, mouseX, mouseY);
+        if (!ClientStorageState.available() || !host.bbd$getCarried().isEmpty())
         {
             return;
         }
 
         List<ClientStorageView.Entry> entries = entries(host);
-        int index = entryIndexAt(host, mouseX, mouseY, entries.size());
-        if (index >= 0)
+        int index = cellIndexAt(host, mouseX, mouseY);
+        if (index >= 0 && index < entries.size())
         {
             ClientStorageView.Entry entry = entries.get(index);
             entry.key().getRender().renderTooltip(
@@ -163,14 +168,33 @@ public final class SidebarRenderer
         }
     }
 
+    private static void renderButtonTooltip(SidebarScreenAccess host, int mouseX, int mouseY)
+    {
+        Button[] buttons = {
+                host.bbd$getPlayerShiftButton(),
+                host.bbd$getContainerShiftButton(),
+                host.bbd$getDepositContainerButton(),
+                host.bbd$getDepositPlayerButton()
+        };
+        for (Button button : buttons)
+        {
+            if (button.visible && button.isMouseOver(mouseX, mouseY) && button.getTooltip() != null)
+            {
+                ((Screen) (Object) host).setTooltipForNextRenderPass(
+                        button.getTooltip().toCharSequence(Minecraft.getInstance()));
+                return;
+            }
+        }
+    }
+
     private static void drawBackground(GuiGraphics graphics, int x, int y, int rows)
     {
-        graphics.blit(CommonTextures.TOP_BASE_COMMON, x, y, 0, 0,
-                CommonTextures.TOP_BASE_COMMON_WIDTH, CommonTextures.TOP_BASE_COMMON_HEIGHT,
-                CommonTextures.TOP_BASE_COMMON_WIDTH, CommonTextures.TOP_BASE_COMMON_HEIGHT);
-        graphics.blit(CommonTextures.COMMON_CONNECTION, x, y + CommonTextures.TOP_BASE_COMMON_HEIGHT, 0, 0,
-                CommonTextures.COMMON_CONNECTION_WIDTH, CommonTextures.COMMON_CONNECTION_HEIGHT,
-                CommonTextures.COMMON_CONNECTION_WIDTH, CommonTextures.COMMON_CONNECTION_HEIGHT);
+        blitCropped(graphics, CommonTextures.TOP_BASE_COMMON, x, y,
+                CommonTextures.TOP_BASE_COMMON_HEIGHT, CommonTextures.TOP_BASE_COMMON_WIDTH,
+                CommonTextures.TOP_BASE_COMMON_HEIGHT);
+        blitCropped(graphics, CommonTextures.COMMON_CONNECTION, x, y + CommonTextures.TOP_BASE_COMMON_HEIGHT,
+                CommonTextures.COMMON_CONNECTION_HEIGHT, CommonTextures.COMMON_CONNECTION_WIDTH,
+                CommonTextures.COMMON_CONNECTION_HEIGHT);
 
         int controlsTop = y + CommonTextures.TOP_BASE_COMMON_HEIGHT + CommonTextures.COMMON_CONNECTION_HEIGHT;
         graphics.fill(x, controlsTop, x + WIDTH, y + GRID_TOP, 0xFFC6C6C6);
@@ -178,15 +202,25 @@ public final class SidebarRenderer
         for (int row = 0; row < rows; row++)
         {
             int rowY = y + GRID_TOP + row * CommonTextures.COMMON_SLOTS_HEIGHT;
-            graphics.blit(CommonTextures.COMMON_SLOTS, x, rowY, 0, 0,
-                    CommonTextures.COMMON_SLOTS_WIDTH, CommonTextures.COMMON_SLOTS_HEIGHT,
-                    CommonTextures.COMMON_SLOTS_WIDTH, CommonTextures.COMMON_SLOTS_HEIGHT);
+            blitCropped(graphics, CommonTextures.COMMON_SLOTS, x, rowY,
+                    CommonTextures.COMMON_SLOTS_HEIGHT, CommonTextures.COMMON_SLOTS_WIDTH,
+                    CommonTextures.COMMON_SLOTS_HEIGHT);
         }
 
         int bottomY = y + GRID_TOP + rows * CommonTextures.COMMON_SLOTS_HEIGHT;
-        graphics.blit(CommonTextures.BOTTOM_BASE_COMMON, x, bottomY, 0, 0,
-                CommonTextures.BOTTOM_BASE_COMMON_WIDTH, CommonTextures.BOTTOM_BASE_COMMON_HEIGHT,
-                CommonTextures.BOTTOM_BASE_COMMON_WIDTH, CommonTextures.BOTTOM_BASE_COMMON_HEIGHT);
+        blitCropped(graphics, CommonTextures.BOTTOM_BASE_COMMON, x, bottomY,
+                CommonTextures.BOTTOM_BASE_COMMON_HEIGHT, CommonTextures.BOTTOM_BASE_COMMON_WIDTH,
+                CommonTextures.BOTTOM_BASE_COMMON_HEIGHT);
+    }
+
+    private static void blitCropped(GuiGraphics graphics, ResourceLocation texture, int x, int y,
+                                    int height, int textureWidth, int textureHeight)
+    {
+        int edgeWidth = Math.min(2, WIDTH);
+        int bodyWidth = WIDTH - edgeWidth;
+        graphics.blit(texture, x, y, 0, 0, bodyWidth, height, textureWidth, textureHeight);
+        graphics.blit(texture, x + bodyWidth, y, textureWidth - edgeWidth, 0,
+                edgeWidth, height, textureWidth, textureHeight);
     }
 
     private static void syncWidgets(SidebarScreenAccess host)
@@ -195,8 +229,12 @@ public final class SidebarRenderer
         StorageSnapshot snapshot = ClientStorageState.snapshot();
         boolean player = snapshot.shiftPlayerInventory();
         boolean container = snapshot.shiftContainer();
-        host.bbd$getPlayerShiftButton().setMessage(Component.literal("玩家移入:" + (player ? "开" : "关")));
-        host.bbd$getContainerShiftButton().setMessage(Component.literal("容器移入:" + (container ? "开" : "关")));
+        host.bbd$getPlayerShiftButton().setMessage(Component.translatable(
+                "better_beyond_dimensions.button.shift_player", player ? "✓" : "×"));
+        host.bbd$getContainerShiftButton().setMessage(Component.translatable(
+                "better_beyond_dimensions.button.shift_container", container ? "✓" : "×"));
+        host.bbd$getDepositContainerButton().setMessage(Component.translatable("better_beyond_dimensions.button.deposit_container"));
+        host.bbd$getDepositPlayerButton().setMessage(Component.translatable("better_beyond_dimensions.button.deposit_player"));
     }
 
     private static void setWidgetsVisible(SidebarScreenAccess host, boolean visible)
@@ -232,7 +270,7 @@ public final class SidebarRenderer
         return STORAGE_VIEW.entries(ClientStorageState.snapshot(), host.bbd$getSearchBox().getValue());
     }
 
-    private static int entryIndexAt(SidebarScreenAccess host, double mouseX, double mouseY, int entryCount)
+    private static int cellIndexAt(SidebarScreenAccess host, double mouseX, double mouseY)
     {
         int x = host.bbd$getSidebarX();
         int y = host.bbd$getSidebarY();
@@ -250,8 +288,7 @@ public final class SidebarRenderer
             return -1;
         }
 
-        int index = (ClientStorageState.scrollRow() + row) * SLOT_COLUMNS + col;
-        return index >= 0 && index < entryCount ? index : -1;
+        return (ClientStorageState.scrollRow() + row) * SLOT_COLUMNS + col;
     }
 
     private static boolean isHovered(int x, int y, double mouseX, double mouseY, int row, int col)

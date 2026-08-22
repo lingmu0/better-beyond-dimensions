@@ -42,6 +42,8 @@ public final class NetworkHandler
                 new DirectionalPayloadHandler<>(DepositPacket::handle, DepositPacket::handle));
         registrar.playBidirectional(WithdrawPacket.TYPE, WithdrawPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(WithdrawPacket::handle, WithdrawPacket::handle));
+        registrar.playBidirectional(SidebarClickPacket.TYPE, SidebarClickPacket.STREAM_CODEC,
+                new DirectionalPayloadHandler<>(SidebarClickPacket::handle, SidebarClickPacket::handle));
     }
 
     public static void requestSnapshot()
@@ -74,6 +76,16 @@ public final class NetworkHandler
         ItemStack request = stack.copy();
         request.setCount(1);
         PacketDistributor.sendToServer(new WithdrawPacket(request, Math.max(1, amount)));
+    }
+
+    public static void clickSidebar(ItemStack stack, int button)
+    {
+        ItemStack request = stack == null ? ItemStack.EMPTY : stack.copy();
+        if (!request.isEmpty())
+        {
+            request.setCount(1);
+        }
+        PacketDistributor.sendToServer(new SidebarClickPacket(request, button));
     }
 
     public static void sendSnapshot(ServerPlayer player)
@@ -252,6 +264,38 @@ public final class NetworkHandler
                     if (context.player() instanceof ServerPlayer player)
                     {
                         StorageActions.withdraw(player, packet.stack, packet.amount);
+                        sendSnapshot(player);
+                    }
+                });
+            }
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type()
+        {
+            return TYPE;
+        }
+    }
+
+    private record SidebarClickPacket(ItemStack stack, int button) implements CustomPacketPayload
+    {
+        private static final Type<SidebarClickPacket> TYPE = new Type<>(BetterBeyondDimensions.id("sidebar_click"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, SidebarClickPacket> STREAM_CODEC = StreamCodec.composite(
+                ItemStack.OPTIONAL_STREAM_CODEC,
+                SidebarClickPacket::stack,
+                ByteBufCodecs.VAR_INT,
+                SidebarClickPacket::button,
+                SidebarClickPacket::new
+        );
+
+        private static void handle(SidebarClickPacket packet, IPayloadContext context)
+        {
+            if (context.flow() == PacketFlow.SERVERBOUND)
+            {
+                context.enqueueWork(() -> {
+                    if (context.player() instanceof ServerPlayer player)
+                    {
+                        StorageActions.clickSidebar(player, packet.stack, packet.button);
                         sendSnapshot(player);
                     }
                 });
