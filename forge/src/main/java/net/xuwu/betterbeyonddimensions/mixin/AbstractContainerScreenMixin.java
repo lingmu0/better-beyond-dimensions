@@ -13,6 +13,7 @@ import net.xuwu.betterbeyonddimensions.NetworkHandler;
 import net.xuwu.betterbeyonddimensions.client.ClientStorageState;
 import net.xuwu.betterbeyonddimensions.client.SidebarRenderer;
 import net.xuwu.betterbeyonddimensions.client.SidebarScreenAccess;
+import net.xuwu.betterbeyonddimensions.client.SidebarSlot;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -20,6 +21,9 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /** Adds the sidebar to vanilla container screens, excluding Beyond Dimensions' own network screens. */
 @Mixin(AbstractContainerScreen.class)
@@ -38,6 +42,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Unique private Button bbd$depositPlayerButton;
     @Unique private net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget bbd$scrollWidget;
     @Unique private boolean bbd$consumeSidebarMouseRelease;
+    @Unique private final List<SidebarSlot> bbd$sidebarSlots = new ArrayList<>();
 
     @Inject(method = "init", at = @At("TAIL"))
     private void bbd$initSidebar(CallbackInfo callbackInfo)
@@ -102,6 +107,8 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
                 Math.max(18, SidebarRenderer.getPanelHeight() - SidebarRenderer.getGridTop() - 7)
         ));
 
+        bbd$rebuildSidebarSlots();
+
         bbd$setWidgetsVisible(false);
         ClientStorageState.clear();
         NetworkHandler.requestSnapshot();
@@ -124,6 +131,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     {
         if (!bbd$isBeyondDimensionsScreen() && bbd$searchBox != null)
         {
+            bbd$rebuildSidebarSlots();
             SidebarRenderer.render(this, graphics, mouseX, mouseY, partialTick);
             SidebarRenderer.renderTooltip(this, graphics, mouseX, mouseY);
         }
@@ -240,5 +248,95 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     public int bbd$getSidebarHeight()
     {
         return Math.max(SidebarRenderer.getPanelHeight(), imageHeight);
+    }
+
+    @Override
+    public List<SidebarSlot> bbd$getSidebarSlots()
+    {
+        return bbd$sidebarSlots;
+    }
+
+    @Override
+    public void bbd$rebuildSidebarSlots()
+    {
+        if (menu == null || bbd$isBeyondDimensionsScreen())
+        {
+            return;
+        }
+
+        AbstractContainerMenuAccessor accessor = (AbstractContainerMenuAccessor) (Object) menu;
+        int slotBaseX = bbd$getSidebarX() + 8 - leftPos;
+        int slotBaseY = bbd$getSidebarY() + SidebarRenderer.getGridTop() + 1 - topPos;
+        for (int index = bbd$sidebarSlots.size(); index < SidebarRenderer.SLOT_COLUMNS * SidebarRenderer.MAX_VISIBLE_ROWS; index++)
+        {
+            int row = index / SidebarRenderer.SLOT_COLUMNS;
+            int column = index % SidebarRenderer.SLOT_COLUMNS;
+            SidebarSlot slot = new SidebarSlot(this, index,
+                    slotBaseX + column * 18,
+                    slotBaseY + row * 18);
+            accessor.bbd$addSlot(slot);
+            bbd$sidebarSlots.add(slot);
+        }
+
+        for (SidebarSlot slot : bbd$sidebarSlots)
+        {
+            if (!menu.slots.contains(slot))
+            {
+                accessor.bbd$addSlot(slot);
+            }
+        }
+    }
+
+    @Override
+    public void bbd$updateSidebarSlots(List<net.xuwu.betterbeyonddimensions.client.ClientStorageView.Entry> entries)
+    {
+        int firstEntry = ClientStorageState.scrollRow() * SidebarRenderer.SLOT_COLUMNS;
+        int rows = SidebarRenderer.getVisibleRows();
+        for (int index = 0; index < bbd$sidebarSlots.size(); index++)
+        {
+            int row = index / SidebarRenderer.SLOT_COLUMNS;
+            int entryIndex = firstEntry + index;
+            boolean active = ClientStorageState.available() && row < rows;
+            SidebarSlot slot = bbd$sidebarSlots.get(index);
+            slot.update(entryIndex, entryIndex < entries.size() ? entries.get(entryIndex) : null, active);
+        }
+    }
+
+    @Override
+    public boolean bbd$handleCreativePlayerQuickMove(double mouseX, double mouseY)
+    {
+        if (!ClientStorageState.available()
+                || !ClientStorageState.snapshot().shiftPlayerInventory()
+                || !menu.getCarried().isEmpty())
+        {
+            return false;
+        }
+
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null)
+        {
+            return false;
+        }
+
+        for (net.minecraft.world.inventory.Slot slot : menu.slots)
+        {
+            if (slot instanceof SidebarSlot
+                    || slot.container != minecraft.player.getInventory()
+                    || !slot.isActive())
+            {
+                continue;
+            }
+
+            double localX = mouseX - leftPos;
+            double localY = mouseY - topPos;
+            if (localX >= slot.x - 1 && localX < slot.x + 17
+                    && localY >= slot.y - 1 && localY < slot.y + 17
+                    && slot.hasItem() && slot.mayPickup(minecraft.player))
+            {
+                NetworkHandler.quickMove(slot.index);
+                return true;
+            }
+        }
+        return false;
     }
 }

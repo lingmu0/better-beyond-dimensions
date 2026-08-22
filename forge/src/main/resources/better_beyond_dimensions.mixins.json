@@ -8,6 +8,7 @@
   ],
   "client": [
     "ScreenWidgetAccessor",
+    "AbstractContainerMenuAccessor",
     "AbstractContainerScreenMixin",
     "CreativeModeInventoryScreenMixin"
   ],

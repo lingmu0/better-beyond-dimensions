@@ -2,6 +2,7 @@ package net.xuwu.betterbeyonddimensions.mixin;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
@@ -76,6 +77,14 @@ public abstract class CreativeModeInventoryScreenMixin
                                           CallbackInfoReturnable<Boolean> callbackInfo)
     {
         if (this instanceof SidebarScreenAccess host
+                && (button == 0 || button == 1)
+                && Screen.hasShiftDown()
+                && host.bbd$handleCreativePlayerQuickMove(mouseX, mouseY))
+        {
+            host.bbd$markSidebarMouseRelease();
+            callbackInfo.setReturnValue(true);
+        }
+        else if (this instanceof SidebarScreenAccess host
                 && host.bbd$getSearchBox() != null
                 && SidebarRenderer.handleMouseClick(host, mouseX, mouseY, button))
         {
