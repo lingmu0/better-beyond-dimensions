@@ -197,7 +197,7 @@ public final class SidebarRenderer
                 CommonTextures.COMMON_CONNECTION_HEIGHT);
 
         int controlsTop = y + CommonTextures.TOP_BASE_COMMON_HEIGHT + CommonTextures.COMMON_CONNECTION_HEIGHT;
-        graphics.fill(x, controlsTop, x + WIDTH, y + GRID_TOP, 0xFFC6C6C6);
+        fillPanelRegion(graphics, x, controlsTop, y + GRID_TOP);
 
         for (int row = 0; row < rows; row++)
         {
@@ -235,6 +235,21 @@ public final class SidebarRenderer
                 cellsWidth, textureHeight, textureWidth, textureHeight);
         graphics.blit(CommonTextures.COMMON_SLOTS, x + borderWidth + cellsWidth, y,
                 textureWidth - borderWidth, 0, borderWidth, textureHeight, textureWidth, textureHeight);
+    }
+
+    private static void fillPanelRegion(GuiGraphics graphics, int x, int top, int bottom)
+    {
+        if (bottom <= top)
+        {
+            return;
+        }
+
+        // Keep the same frame as COMMON_CONNECTION while the buttons occupy this region.
+        graphics.fill(x + 2, top, x + WIDTH - 2, bottom, 0xFFC6C6C6);
+        graphics.fill(x, top, x + 1, bottom, 0xFF000000);
+        graphics.fill(x + 1, top, x + 2, bottom, 0xFFF1F1F1);
+        graphics.fill(x + WIDTH - 2, top, x + WIDTH - 1, bottom, 0xFFF1F1F1);
+        graphics.fill(x + WIDTH - 1, top, x + WIDTH, bottom, 0xFF000000);
     }
 
     private static void syncWidgets(SidebarScreenAccess host)
