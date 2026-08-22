@@ -19,11 +19,15 @@ public interface SidebarScreenAccess
 
     Button bbd$getDepositPlayerButton();
 
+    Button bbd$getSidebarToggleButton();
+
     ItemStack bbd$getCarried();
 
     void bbd$markSidebarMouseRelease();
 
     boolean bbd$consumeSidebarMouseRelease();
+
+    boolean bbd$isSidebarHidden();
 
     int bbd$getSidebarX();
 

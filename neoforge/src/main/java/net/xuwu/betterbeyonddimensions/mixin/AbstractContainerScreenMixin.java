@@ -40,8 +40,10 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Unique private Button bbd$containerShiftButton;
     @Unique private Button bbd$depositContainerButton;
     @Unique private Button bbd$depositPlayerButton;
+    @Unique private Button bbd$sidebarToggleButton;
     @Unique private net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget bbd$scrollWidget;
     @Unique private boolean bbd$consumeSidebarMouseRelease;
+    @Unique private boolean bbd$sidebarHidden;
     @Unique private final List<SidebarSlot> bbd$sidebarSlots = new ArrayList<>();
 
     @Inject(method = "init", at = @At("TAIL"))
@@ -99,6 +101,9 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         bbd$depositPlayerButton = bbd$addRenderableWidget(Button.builder(Component.literal("存包"), button -> NetworkHandler.depositPlayerInventory())
                 .bounds(secondButtonX, secondButtonY, buttonWidth, 14).build());
         bbd$depositPlayerButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.deposit_player")));
+        bbd$sidebarToggleButton = bbd$addRenderableWidget(Button.builder(Component.literal("×"), button -> bbd$toggleSidebar())
+                .bounds(x + SidebarRenderer.WIDTH - 15, y + 2, 12, 12).build());
+        bbd$sidebarToggleButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.hide_sidebar")));
         bbd$scrollWidget = bbd$addRenderableWidget(new net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget(
                 this,
                 x + 7,
@@ -110,8 +115,20 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         bbd$rebuildSidebarSlots();
 
         bbd$setWidgetsVisible(false);
+        bbd$sidebarToggleButton.visible = false;
+        bbd$sidebarToggleButton.active = false;
         ClientStorageState.clear();
         NetworkHandler.requestSnapshot();
+    }
+
+    @Inject(method = "render", at = @At("HEAD"))
+    private void bbd$prepareSidebarSlots(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo callbackInfo)
+    {
+        if (!bbd$isBeyondDimensionsScreen() && bbd$searchBox != null)
+        {
+            bbd$rebuildSidebarSlots();
+            SidebarRenderer.prepareSlots(this);
+        }
     }
 
     @Unique
@@ -180,6 +197,19 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         bbd$depositContainerButton.active = visible;
         bbd$depositPlayerButton.visible = visible;
         bbd$depositPlayerButton.active = visible;
+        bbd$scrollWidget.visible = visible;
+        bbd$scrollWidget.active = visible;
+    }
+
+    @Unique
+    private void bbd$toggleSidebar()
+    {
+        bbd$sidebarHidden = !bbd$sidebarHidden;
+        if (bbd$sidebarHidden && bbd$searchBox != null)
+        {
+            ((net.minecraft.client.gui.screens.Screen) (Object) this).setFocused(null);
+            bbd$searchBox.setFocused(false);
+        }
     }
 
     @Override
@@ -213,6 +243,12 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     }
 
     @Override
+    public Button bbd$getSidebarToggleButton()
+    {
+        return bbd$sidebarToggleButton;
+    }
+
+    @Override
     public net.minecraft.world.item.ItemStack bbd$getCarried()
     {
         return menu.getCarried();
@@ -233,15 +269,21 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     }
 
     @Override
+    public boolean bbd$isSidebarHidden()
+    {
+        return bbd$sidebarHidden;
+    }
+
+    @Override
     public int bbd$getSidebarX()
     {
-        return Math.max(4, leftPos - SidebarRenderer.WIDTH - 6);
+        return Math.max(4, leftPos - SidebarRenderer.WIDTH - 2);
     }
 
     @Override
     public int bbd$getSidebarY()
     {
-        return Math.max(4, topPos - 1);
+        return Math.max(4, topPos + 3);
     }
 
     @Override

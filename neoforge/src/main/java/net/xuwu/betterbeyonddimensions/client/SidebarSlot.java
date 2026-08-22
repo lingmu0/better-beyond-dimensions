@@ -35,11 +35,26 @@ public final class SidebarSlot extends Slot
 
     public void update(int storageIndex, ClientStorageView.Entry entry, boolean active)
     {
-        this.storageIndex = entry == null ? -1 : storageIndex;
-        this.key = entry == null ? null : entry.key();
-        this.amount = entry == null ? 0L : Math.max(0L, entry.amount());
-        this.renderStack = this.key == null ? ItemStack.EMPTY : this.key.getRenderStack().copy();
+        clear();
         this.active = active;
+        if (!active || entry == null || entry.key() == null || entry.amount() <= 0L)
+        {
+            return;
+        }
+
+        this.storageIndex = storageIndex;
+        this.key = entry.key();
+        this.amount = entry.amount();
+        this.renderStack = this.key.getRenderStack().copy();
+    }
+
+    public void clear()
+    {
+        this.storageIndex = -1;
+        this.key = null;
+        this.renderStack = ItemStack.EMPTY;
+        this.amount = 0L;
+        this.active = false;
     }
 
     public int getVisualIndex()
