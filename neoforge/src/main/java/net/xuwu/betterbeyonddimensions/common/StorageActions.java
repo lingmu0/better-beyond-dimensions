@@ -232,30 +232,10 @@ public final class StorageActions
         else
         {
             ItemStackKey carriedKey = new ItemStackKey(carried);
-            if (clickedKey == null || clicked == null || clickedKey.isSameTypeSameComponents(carriedKey))
-            {
-                insertCarried(storage, player, carried, carriedKey, button);
-            }
-            else if (button == 0
-                    && carried.getCount() <= carried.getMaxStackSize()
-                    && clicked.amount() <= clickedKey.getVanillaMaxStackSize())
-            {
-                // Match the native storage slot's left-click swap when both stacks fit one slot.
-                KeyAmount extracted = storage.extract(clickedKey, clicked.amount(), false, false);
-                if (extracted.key() instanceof ItemStackKey extractedKey && extracted.amount() > 0L)
-                {
-                    KeyAmount remaining = storage.insert(carriedKey, carried.getCount(), true);
-                    if (remaining.isEmpty())
-                    {
-                        storage.insert(carriedKey, carried.getCount(), false);
-                        player.containerMenu.setCarried(extractedKey.copyStackWithCount(extracted.amount()));
-                    }
-                    else
-                    {
-                        storage.insert(extracted.key(), extracted.amount(), false);
-                    }
-                }
-            }
+            // The sidebar is a storage view, not a two-slot swap surface.  Match the native
+            // Beyond Dimensions storage interaction: a carried stack is always inserted into
+            // the network, even when the clicked cell contains a different item.
+            insertCarried(storage, player, carried, carriedKey, button);
         }
 
         player.containerMenu.broadcastChanges();

@@ -20,13 +20,13 @@ import java.util.List;
 /** Renders a compact Beyond Dimensions-style storage view beside vanilla container screens. */
 public final class SidebarRenderer
 {
-    private static final int SLOT_COLUMNS = 5;
+    public static final int SLOT_COLUMNS = 5;
     public static final int WIDTH = SLOT_COLUMNS * 18 + 14;
 
     private static final int GRID_TOP = CommonTextures.TOP_BASE_COMMON_HEIGHT
             + CommonTextures.COMMON_CONNECTION_HEIGHT
             + 18;
-    private static final int MAX_VISIBLE_ROWS = 8;
+    public static final int MAX_VISIBLE_ROWS = 8;
 
     private static final ClientStorageView STORAGE_VIEW = new ClientStorageView();
 
@@ -51,6 +51,11 @@ public final class SidebarRenderer
         return GRID_TOP;
     }
 
+    public static int getVisibleRows()
+    {
+        return visibleRows();
+    }
+
     public static void render(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY, float partialTick)
     {
         StorageSnapshot snapshot = ClientStorageState.snapshot();
@@ -64,6 +69,7 @@ public final class SidebarRenderer
         List<ClientStorageView.Entry> entries = entries(host);
         int rows = visibleRows();
         syncScrollState(snapshot, host.bbd$getSearchBox().getValue(), entries.size());
+        host.bbd$updateSidebarSlots(entries);
 
         int x = host.bbd$getSidebarX();
         int y = host.bbd$getSidebarY();
@@ -85,14 +91,14 @@ public final class SidebarRenderer
                 {
                     graphics.fill(slotX, slotY, slotX + 16, slotY + 16, 0x80FFFFFF);
                 }
-                if (entryIndex < 0 || entryIndex >= entries.size())
+                SidebarSlot slot = host.bbd$getSidebarSlots().get(row * SLOT_COLUMNS + col);
+                if (entryIndex < 0 || entryIndex >= entries.size() || !slot.hasItem())
                 {
                     continue;
                 }
 
-                ClientStorageView.Entry entry = entries.get(entryIndex);
-                entry.key().getRender().render(graphics, entry.key(), slotX, slotY);
-                entry.key().getRender().renderAmount(graphics, entry.amount(), slotX, slotY);
+                slot.getKey().getRender().render(graphics, slot.getKey(), slotX, slotY);
+                slot.getKey().getRender().renderAmount(graphics, slot.getStoredAmount(), slotX, slotY);
             }
         }
 
@@ -107,18 +113,17 @@ public final class SidebarRenderer
         }
 
         List<ClientStorageView.Entry> entries = entries(host);
-        int index = cellIndexAt(host, mouseX, mouseY);
-        if (index < 0)
+        host.bbd$updateSidebarSlots(entries);
+        SidebarSlot slot = slotAt(host, mouseX, mouseY);
+        if (slot == null)
         {
             return false;
         }
 
-        ItemStack stack = index < entries.size()
-                ? entries.get(index).key().getRenderStack()
-                : ItemStack.EMPTY;
-        if (Screen.hasShiftDown() && !stack.isEmpty() && index < entries.size())
+        ItemStack stack = slot.getItem();
+        if (Screen.hasShiftDown() && !stack.isEmpty())
         {
-            long amount = Math.min(entries.get(index).amount(), Math.max(1, stack.getMaxStackSize()));
+            long amount = Math.min(slot.getStoredAmount(), Math.max(1, stack.getMaxStackSize()));
             NetworkHandler.withdraw(stack, (int) amount);
         }
         else
@@ -197,15 +202,15 @@ public final class SidebarRenderer
         }
 
         List<ClientStorageView.Entry> entries = entries(host);
-        int index = cellIndexAt(host, mouseX, mouseY);
-        if (index >= 0 && index < entries.size())
+        host.bbd$updateSidebarSlots(entries);
+        SidebarSlot slot = slotAt(host, mouseX, mouseY);
+        if (slot != null && slot.hasItem() && slot.getKey() != null)
         {
-            ClientStorageView.Entry entry = entries.get(index);
-            entry.key().getRender().renderTooltip(
+            slot.getKey().getRender().renderTooltip(
                     graphics,
                     Minecraft.getInstance().font,
-                    entry.key(),
-                    entry.amount(),
+                    slot.getKey(),
+                    slot.getStoredAmount(),
                     mouseX,
                     mouseY
             );
@@ -362,6 +367,24 @@ public final class SidebarRenderer
         }
 
         return (ClientStorageState.scrollRow() + row) * SLOT_COLUMNS + col;
+    }
+
+    private static SidebarSlot slotAt(SidebarScreenAccess host, double mouseX, double mouseY)
+    {
+        int storageIndex = cellIndexAt(host, mouseX, mouseY);
+        if (storageIndex < 0)
+        {
+            return null;
+        }
+
+        int visualIndex = storageIndex - ClientStorageState.scrollRow() * SLOT_COLUMNS;
+        List<SidebarSlot> slots = host.bbd$getSidebarSlots();
+        if (visualIndex < 0 || visualIndex >= slots.size())
+        {
+            return null;
+        }
+        SidebarSlot slot = slots.get(visualIndex);
+        return slot.isActive() ? slot : null;
     }
 
     private static boolean isHovered(int x, int y, double mouseX, double mouseY, int row, int col)
