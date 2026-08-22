@@ -14,5 +14,6 @@
   "better_beyond_dimensions.tooltip.deposit_container": "将打开的容器物品一键存入维度网络",
   "better_beyond_dimensions.tooltip.deposit_player": "将玩家物品栏（不含快捷栏）一键存入维度网络",
   "better_beyond_dimensions.tooltip.hide_sidebar": "隐藏侧边栏",
-  "better_beyond_dimensions.tooltip.show_sidebar": "显示侧边栏"
+  "better_beyond_dimensions.tooltip.show_sidebar": "显示侧边栏",
+  "better_beyond_dimensions.jei.missing_ingredients": "缺少配方所需的物品"
 }

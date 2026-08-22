@@ -12,6 +12,7 @@ import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 import net.xuwu.betterbeyonddimensions.client.ClientStorageState;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorage;
+import net.xuwu.betterbeyonddimensions.common.RecipeFill;
 import net.xuwu.betterbeyonddimensions.common.StorageActions;
 import net.xuwu.betterbeyonddimensions.common.StorageEntry;
 import net.xuwu.betterbeyonddimensions.common.StorageSnapshot;
@@ -73,6 +74,30 @@ public final class NetworkHandler
                 buffer -> new SidebarClickPacket(buffer.readItem(), buffer.readVarInt()),
                 NetworkHandler::handleSidebarClick,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, RecipeFillPacket.class,
+                (packet, buffer) -> {
+                    int count = Math.min(64, packet.fills.size());
+                    buffer.writeVarInt(count);
+                    for (int index = 0; index < count; index++)
+                    {
+                        RecipeFill fill = packet.fills.get(index);
+                        buffer.writeVarInt(fill.slotId());
+                        buffer.writeItem(fill.stack());
+                        buffer.writeVarInt(Math.min(64, fill.amount()));
+                    }
+                },
+                buffer -> {
+                    int count = Math.min(64, Math.max(0, buffer.readVarInt()));
+                    List<RecipeFill> fills = new ArrayList<>(count);
+                    for (int index = 0; index < count; index++)
+                    {
+                        fills.add(new RecipeFill(buffer.readVarInt(), buffer.readItem(),
+                                Math.min(64, Math.max(0, buffer.readVarInt()))));
+                    }
+                    return new RecipeFillPacket(fills);
+                },
+                NetworkHandler::handleRecipeFill,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
     }
 
     public static void requestSnapshot()
@@ -115,6 +140,15 @@ public final class NetworkHandler
             request.setCount(1);
         }
         CHANNEL.sendToServer(new SidebarClickPacket(request, button));
+    }
+
+    public static void fillRecipe(List<RecipeFill> fills)
+    {
+        if (fills == null || fills.isEmpty())
+        {
+            return;
+        }
+        CHANNEL.sendToServer(new RecipeFillPacket(List.copyOf(fills)));
     }
 
     private static void handleRequestSnapshot(RequestSnapshotPacket packet, Supplier<NetworkEvent.Context> contextSupplier)
@@ -196,6 +230,20 @@ public final class NetworkHandler
             if (player != null)
             {
                 StorageActions.clickSidebar(player, packet.stack, packet.button);
+                sendSnapshot(player);
+            }
+        });
+        context.setPacketHandled(true);
+    }
+
+    private static void handleRecipeFill(RecipeFillPacket packet, Supplier<NetworkEvent.Context> contextSupplier)
+    {
+        NetworkEvent.Context context = contextSupplier.get();
+        context.enqueueWork(() -> {
+            ServerPlayer player = context.getSender();
+            if (player != null)
+            {
+                StorageActions.fillRecipe(player, packet.fills);
                 sendSnapshot(player);
             }
         });
@@ -294,6 +342,16 @@ public final class NetworkHandler
         {
             this.stack = stack;
             this.button = button;
+        }
+    }
+
+    private static final class RecipeFillPacket
+    {
+        private final List<RecipeFill> fills;
+
+        private RecipeFillPacket(List<RecipeFill> fills)
+        {
+            this.fills = fills == null ? List.of() : List.copyOf(fills);
         }
     }
 }

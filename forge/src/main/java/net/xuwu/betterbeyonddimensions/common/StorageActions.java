@@ -10,8 +10,11 @@ import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+
+import java.util.List;
 
 /**
  * All mutations are performed here, on the logical server.
@@ -170,6 +173,108 @@ public final class StorageActions
     }
 
     /**
+     * Fills real crafting slots for JEI's recipe-transfer button.  The client only sends the
+     * selected ingredient variants and target slot ids; all item movement is performed here on
+     * the logical server, using the network before the player's inventory.
+     */
+    public static void fillRecipe(ServerPlayer player, List<RecipeFill> fills)
+    {
+        if (player == null || player.containerMenu == null || fills == null || fills.isEmpty())
+        {
+            return;
+        }
+
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        UnifiedStorage storage = network == null ? null : network.getUnifiedStorage();
+        List<Container> changedContainers = new java.util.ArrayList<>();
+
+        for (RecipeFill fill : fills)
+        {
+            if (fill == null || fill.slotId() < 0 || fill.slotId() >= player.containerMenu.slots.size())
+            {
+                continue;
+            }
+
+            Slot target = player.containerMenu.slots.get(fill.slotId());
+            if (!(target.container instanceof CraftingContainer))
+            {
+                continue;
+            }
+
+            ItemStack desired = fill.stack() == null ? ItemStack.EMPTY : fill.stack().copy();
+            ItemStack current = target.getItem().copy();
+
+            if (desired.isEmpty() || fill.amount() <= 0)
+            {
+                if (!current.isEmpty() && canInsertIntoPlayerInventory(player, current))
+                {
+                    insertIntoPlayerInventory(player, current);
+                    target.set(ItemStack.EMPTY);
+                    addChangedContainer(changedContainers, target.container);
+                }
+                continue;
+            }
+
+            desired.setCount(1);
+            if (!target.mayPlace(desired))
+            {
+                continue;
+            }
+
+            if (!current.isEmpty() && !sameStoredStack(current, desired))
+            {
+                if (!canInsertIntoPlayerInventory(player, current))
+                {
+                    continue;
+                }
+                insertIntoPlayerInventory(player, current);
+                target.set(ItemStack.EMPTY);
+                current = ItemStack.EMPTY;
+                addChangedContainer(changedContainers, target.container);
+            }
+
+            int limit = Math.min(target.getMaxStackSize(desired), desired.getMaxStackSize());
+            int requested = Math.min(Math.max(1, fill.amount()), Math.max(1, limit));
+            int currentCount = current.isEmpty() ? 0 : current.getCount();
+            int missing = Math.max(0, requested - currentCount);
+            if (missing <= 0)
+            {
+                continue;
+            }
+
+            int inserted = 0;
+            if (storage != null)
+            {
+                ItemStackKey key = new ItemStackKey(desired);
+                KeyAmount extracted = storage.extract(key, missing, false, false);
+                if (extracted.amount() > 0L)
+                {
+                    inserted = (int) Math.min((long) missing, extracted.amount());
+                }
+            }
+
+            if (inserted < missing)
+            {
+                inserted += removeFromPlayerInventory(player, desired, missing - inserted);
+            }
+
+            if (inserted > 0)
+            {
+                ItemStack result = current.isEmpty() ? desired.copy() : current.copy();
+                result.setCount(currentCount + inserted);
+                target.set(result);
+                addChangedContainer(changedContainers, target.container);
+            }
+        }
+
+        for (Container container : changedContainers)
+        {
+            player.containerMenu.slotsChanged(container);
+        }
+        player.containerMenu.broadcastChanges();
+    }
+
+    /**
      * Handles the overlay storage slot using the same basic left/right rules as Beyond Dimensions.
      * The server menu's carried stack is authoritative, so the cursor can continue into vanilla
      * container slots after taking an item from the sidebar.
@@ -323,6 +428,73 @@ public final class StorageActions
             inventory.setChanged();
         }
         return original - remaining;
+    }
+
+    private static int removeFromPlayerInventory(ServerPlayer player, ItemStack requested, int amount)
+    {
+        if (requested == null || requested.isEmpty() || amount <= 0)
+        {
+            return 0;
+        }
+
+        Inventory inventory = player.getInventory();
+        int remaining = amount;
+        for (int index = 0; index < inventory.getContainerSize() && remaining > 0; index++)
+        {
+            ItemStack existing = inventory.getItem(index);
+            if (existing.isEmpty() || !sameStoredStack(existing, requested))
+            {
+                continue;
+            }
+
+            int move = Math.min(existing.getCount(), remaining);
+            existing.shrink(move);
+            remaining -= move;
+        }
+
+        if (remaining != amount)
+        {
+            inventory.setChanged();
+        }
+        return amount - remaining;
+    }
+
+    private static boolean canInsertIntoPlayerInventory(ServerPlayer player, ItemStack input)
+    {
+        if (input == null || input.isEmpty())
+        {
+            return true;
+        }
+
+        Inventory inventory = player.getInventory();
+        int remaining = input.getCount();
+        for (int index = 0; index < inventory.getContainerSize() && remaining > 0; index++)
+        {
+            ItemStack existing = inventory.getItem(index);
+            if (existing.isEmpty() || !sameStoredStack(existing, input))
+            {
+                continue;
+            }
+            int limit = Math.min(existing.getMaxStackSize(), inventory.getMaxStackSize());
+            remaining -= Math.min(Math.max(0, limit - existing.getCount()), remaining);
+        }
+
+        for (int index = 0; index < inventory.getContainerSize() && remaining > 0; index++)
+        {
+            if (inventory.getItem(index).isEmpty())
+            {
+                remaining -= Math.min(input.getMaxStackSize(), remaining);
+            }
+        }
+        return remaining <= 0;
+    }
+
+    private static void addChangedContainer(List<Container> containers, Container container)
+    {
+        if (container != null && !containers.contains(container))
+        {
+            containers.add(container);
+        }
     }
 
     private static boolean sameStoredStack(ItemStack first, ItemStack second)

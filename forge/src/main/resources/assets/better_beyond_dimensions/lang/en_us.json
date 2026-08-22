@@ -12,5 +12,6 @@
   "better_beyond_dimensions.tooltip.shift_player": "Shift-transfer player inventory items to the dimension network",
   "better_beyond_dimensions.tooltip.shift_container": "Shift-transfer open container items to the dimension network",
   "better_beyond_dimensions.tooltip.deposit_container": "Deposit all items from the open container into the dimension network",
-  "better_beyond_dimensions.tooltip.deposit_player": "Deposit the player inventory into the dimension network, excluding the hotbar"
+  "better_beyond_dimensions.tooltip.deposit_player": "Deposit the player inventory into the dimension network, excluding the hotbar",
+  "better_beyond_dimensions.jei.missing_ingredients": "Missing ingredients for this recipe"
 }
