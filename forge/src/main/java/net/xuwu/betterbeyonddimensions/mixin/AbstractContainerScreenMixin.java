@@ -37,6 +37,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Unique private Button bbd$depositContainerButton;
     @Unique private Button bbd$depositPlayerButton;
     @Unique private net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget bbd$scrollWidget;
+    @Unique private boolean bbd$consumeSidebarMouseRelease;
 
     @Inject(method = "init", at = @At("TAIL"))
     private void bbd$initSidebar(CallbackInfo callbackInfo)
@@ -134,6 +135,17 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         if (!bbd$isBeyondDimensionsScreen() && bbd$searchBox != null
                 && SidebarRenderer.handleClick(this, mouseX, mouseY, button))
         {
+            bbd$consumeSidebarMouseRelease = true;
+            callbackInfo.setReturnValue(true);
+        }
+    }
+
+    @Inject(method = "mouseReleased", at = @At("HEAD"), cancellable = true)
+    private void bbd$sidebarRelease(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> callbackInfo)
+    {
+        if (bbd$consumeSidebarMouseRelease)
+        {
+            bbd$consumeSidebarMouseRelease = false;
             callbackInfo.setReturnValue(true);
         }
     }
