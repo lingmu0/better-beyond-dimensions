@@ -29,6 +29,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Shadow protected int topPos;
     @Shadow protected int imageWidth;
     @Shadow protected int imageHeight;
+    @Shadow protected T menu;
 
     @Unique private EditBox bbd$searchBox;
     @Unique private Button bbd$playerShiftButton;
@@ -48,13 +49,14 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
 
         int x = bbd$getSidebarX();
         int y = bbd$getSidebarY();
-        int buttonWidth = (SidebarRenderer.WIDTH - 14) / 2;
+        int buttonWidth = (SidebarRenderer.WIDTH - 8 - 3) / 4;
+        int buttonGap = 1;
 
         bbd$searchBox = bbd$addRenderableWidget(new EditBox(
                 Minecraft.getInstance().font,
-                x + 54,
+                x + 4,
                 y + 4,
-                116,
+                SidebarRenderer.WIDTH - 8,
                 Minecraft.getInstance().font.lineHeight + 5,
                 Component.translatable("wintercogs.beyonddimensions.dimensionsguisearch")
         ));
@@ -75,20 +77,24 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
                 : null);
         bbd$searchBox.setValue(CommonConfigRuntime.uiSearch);
 
-        bbd$playerShiftButton = bbd$addRenderableWidget(Button.builder(Component.literal("玩家移入:关"), button -> NetworkHandler.togglePlayerShift())
-                .bounds(x + 6, y + 26, buttonWidth, 16).build());
-        bbd$containerShiftButton = bbd$addRenderableWidget(Button.builder(Component.literal("容器移入:关"), button -> NetworkHandler.toggleContainerShift())
-                .bounds(x + 8 + buttonWidth, y + 26, buttonWidth, 16).build());
-        bbd$depositContainerButton = bbd$addRenderableWidget(Button.builder(Component.literal("存入容器"), button -> NetworkHandler.depositContainer())
-                .bounds(x + 6, y + 43, buttonWidth, 16).build());
-        bbd$depositPlayerButton = bbd$addRenderableWidget(Button.builder(Component.literal("存入背包"), button -> NetworkHandler.depositPlayerInventory())
-                .bounds(x + 8 + buttonWidth, y + 43, buttonWidth, 16).build());
+        bbd$playerShiftButton = bbd$addRenderableWidget(Button.builder(Component.literal("人×"), button -> NetworkHandler.togglePlayerShift())
+                .bounds(x + 3, y + 33, buttonWidth, 14).build());
+        bbd$playerShiftButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.shift_player")));
+        bbd$containerShiftButton = bbd$addRenderableWidget(Button.builder(Component.literal("箱×"), button -> NetworkHandler.toggleContainerShift())
+                .bounds(x + 3 + buttonWidth + buttonGap, y + 33, buttonWidth, 14).build());
+        bbd$containerShiftButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.shift_container")));
+        bbd$depositContainerButton = bbd$addRenderableWidget(Button.builder(Component.literal("存箱"), button -> NetworkHandler.depositContainer())
+                .bounds(x + 3 + (buttonWidth + buttonGap) * 2, y + 33, buttonWidth, 14).build());
+        bbd$depositContainerButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.deposit_container")));
+        bbd$depositPlayerButton = bbd$addRenderableWidget(Button.builder(Component.literal("存包"), button -> NetworkHandler.depositPlayerInventory())
+                .bounds(x + 3 + (buttonWidth + buttonGap) * 3, y + 33, buttonWidth, 14).build());
+        bbd$depositPlayerButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.deposit_player")));
         bbd$scrollWidget = bbd$addRenderableWidget(new net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget(
                 this,
                 x + 7,
-                y + 58,
+                y + SidebarRenderer.getGridTop(),
                 SidebarRenderer.WIDTH - 14,
-                Math.max(18, SidebarRenderer.getPanelHeight() - 65)
+                Math.max(18, SidebarRenderer.getPanelHeight() - SidebarRenderer.getGridTop() - 7)
         ));
 
         bbd$setWidgetsVisible(false);
@@ -181,6 +187,12 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     public Button bbd$getDepositPlayerButton()
     {
         return bbd$depositPlayerButton;
+    }
+
+    @Override
+    public net.minecraft.world.item.ItemStack bbd$getCarried()
+    {
+        return menu.getCarried();
     }
 
     @Override
