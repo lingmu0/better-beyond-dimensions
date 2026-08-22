@@ -41,5 +41,4 @@ public interface SidebarScreenAccess
 
     void bbd$updateSidebarSlots(List<ClientStorageView.Entry> entries);
 
-    boolean bbd$handleCreativePlayerQuickMove(double mouseX, double mouseY);
 }
