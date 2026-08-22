@@ -36,12 +36,12 @@ public abstract class CreativeModeInventoryScreenMixin
     }
 
     @Inject(method = "mouseScrolled", at = @At("HEAD"), cancellable = true)
-    private void bbd$creativeSidebarScroll(double mouseX, double mouseY, double scrollAmount,
+    private void bbd$creativeSidebarScroll(double mouseX, double mouseY, double scrollX, double scrollY,
                                             CallbackInfoReturnable<Boolean> callbackInfo)
     {
         if (this instanceof SidebarScreenAccess host
                 && host.bbd$getSearchBox() != null
-                && SidebarRenderer.handleScroll(host, mouseX, mouseY, scrollAmount))
+                && SidebarRenderer.handleScroll(host, mouseX, mouseY, scrollY))
         {
             callbackInfo.setReturnValue(true);
         }
