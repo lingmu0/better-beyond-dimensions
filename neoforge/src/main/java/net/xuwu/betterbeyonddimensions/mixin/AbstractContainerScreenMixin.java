@@ -1,16 +1,18 @@
 package net.xuwu.betterbeyonddimensions.mixin;
 
+import com.wintercogs.beyonddimensions.config.CommonConfigRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.xuwu.betterbeyonddimensions.NetworkHandler;
 import net.xuwu.betterbeyonddimensions.client.ClientStorageState;
 import net.xuwu.betterbeyonddimensions.client.SidebarRenderer;
 import net.xuwu.betterbeyonddimensions.client.SidebarScreenAccess;
-import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -19,7 +21,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Adds the sidebar to every vanilla AbstractContainerScreen. */
+/** Adds the sidebar to vanilla container screens, excluding Beyond Dimensions' own network screens. */
 @Mixin(AbstractContainerScreen.class)
 public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMenu> implements SidebarScreenAccess
 {
@@ -33,33 +35,61 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Unique private Button bbd$containerShiftButton;
     @Unique private Button bbd$depositContainerButton;
     @Unique private Button bbd$depositPlayerButton;
+    @Unique private net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget bbd$scrollWidget;
 
     @Inject(method = "init", at = @At("TAIL"))
     private void bbd$initSidebar(CallbackInfo callbackInfo)
     {
+        if (bbd$isBeyondDimensionsScreen())
+        {
+            ClientStorageState.clear();
+            return;
+        }
+
         int x = bbd$getSidebarX();
         int y = bbd$getSidebarY();
         int buttonWidth = (SidebarRenderer.WIDTH - 14) / 2;
 
         bbd$searchBox = bbd$addRenderableWidget(new EditBox(
                 Minecraft.getInstance().font,
-                x + 6,
-                y + 38,
-                SidebarRenderer.WIDTH - 12,
-                18,
-                Component.literal("搜索维度网络")
+                x + 54,
+                y + 4,
+                116,
+                Minecraft.getInstance().font.lineHeight + 5,
+                Component.translatable("wintercogs.beyonddimensions.dimensionsguisearch")
         ));
-        bbd$searchBox.setMaxLength(80);
-        bbd$searchBox.setHint(Component.literal("搜索物品"));
+        bbd$searchBox.setMaxLength(200);
+        bbd$searchBox.setBordered(true);
+        bbd$searchBox.setVisible(true);
+        bbd$searchBox.setTextColor(16777215);
+        bbd$searchBox.setTooltip(Tooltip.create(Component.translatable("tooltip.editbox.beyonddimensions.search")));
+        bbd$searchBox.setResponder(text -> {
+            bbd$searchBox.setSuggestion(text.isEmpty()
+                    ? Component.translatable("wintercogs.beyonddimensions.dimensionsguisearch").getString()
+                    : null);
+            CommonConfigRuntime.uiSearch = text;
+            ClientStorageState.resetScroll();
+        });
+        bbd$searchBox.setSuggestion(CommonConfigRuntime.uiSearch.isEmpty()
+                ? Component.translatable("wintercogs.beyonddimensions.dimensionsguisearch").getString()
+                : null);
+        bbd$searchBox.setValue(CommonConfigRuntime.uiSearch);
 
         bbd$playerShiftButton = bbd$addRenderableWidget(Button.builder(Component.literal("玩家移入:关"), button -> NetworkHandler.togglePlayerShift())
-                .bounds(x + 6, y + 58, buttonWidth, 18).build());
+                .bounds(x + 6, y + 26, buttonWidth, 16).build());
         bbd$containerShiftButton = bbd$addRenderableWidget(Button.builder(Component.literal("容器移入:关"), button -> NetworkHandler.toggleContainerShift())
-                .bounds(x + 8 + buttonWidth, y + 58, buttonWidth, 18).build());
+                .bounds(x + 8 + buttonWidth, y + 26, buttonWidth, 16).build());
         bbd$depositContainerButton = bbd$addRenderableWidget(Button.builder(Component.literal("存入容器"), button -> NetworkHandler.depositContainer())
-                .bounds(x + 6, y + 80, buttonWidth, 18).build());
+                .bounds(x + 6, y + 43, buttonWidth, 16).build());
         bbd$depositPlayerButton = bbd$addRenderableWidget(Button.builder(Component.literal("存入背包"), button -> NetworkHandler.depositPlayerInventory())
-                .bounds(x + 8 + buttonWidth, y + 80, buttonWidth, 18).build());
+                .bounds(x + 8 + buttonWidth, y + 43, buttonWidth, 16).build());
+        bbd$scrollWidget = bbd$addRenderableWidget(new net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget(
+                this,
+                x + 7,
+                y + 58,
+                SidebarRenderer.WIDTH - 14,
+                Math.max(18, SidebarRenderer.getPanelHeight() - 65)
+        ));
 
         bbd$setWidgetsVisible(false);
         ClientStorageState.clear();
@@ -81,7 +111,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Inject(method = "render", at = @At("TAIL"))
     private void bbd$renderSidebar(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo callbackInfo)
     {
-        if (bbd$searchBox != null)
+        if (!bbd$isBeyondDimensionsScreen() && bbd$searchBox != null)
         {
             SidebarRenderer.render(this, graphics, mouseX, mouseY, partialTick);
             SidebarRenderer.renderTooltip(this, graphics, mouseX, mouseY);
@@ -91,15 +121,26 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
     private void bbd$sidebarClick(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> callbackInfo)
     {
-        if (bbd$searchBox != null && SidebarRenderer.handleClick(this, mouseX, mouseY, button))
+        if (!bbd$isBeyondDimensionsScreen() && bbd$searchBox != null
+                && SidebarRenderer.handleClick(this, mouseX, mouseY, button))
         {
             callbackInfo.setReturnValue(true);
         }
     }
 
     @Unique
+    private boolean bbd$isBeyondDimensionsScreen()
+    {
+        return this.getClass().getName().startsWith("com.wintercogs.beyonddimensions.");
+    }
+
+    @Unique
     private void bbd$setWidgetsVisible(boolean visible)
     {
+        if (bbd$searchBox == null)
+        {
+            return;
+        }
         bbd$searchBox.visible = visible;
         bbd$searchBox.active = visible;
         bbd$playerShiftButton.visible = visible;
@@ -157,6 +198,6 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Override
     public int bbd$getSidebarHeight()
     {
-        return Math.max(210, imageHeight);
+        return Math.max(SidebarRenderer.getPanelHeight(), imageHeight);
     }
 }

@@ -4,17 +4,15 @@ import com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet;
 import com.wintercogs.beyonddimensions.api.dimensionnet.UnifiedStorage;
 import com.wintercogs.beyonddimensions.api.storage.key.KeyAmount;
 import com.wintercogs.beyonddimensions.api.storage.key.impl.ItemStackKey;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.player.Player;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 /** Read-only adapter from the Beyond Dimensions API to this add-on's packets. */
 public final class NetworkStorage
 {
-    private static final int MAX_CLIENT_ENTRIES = 128;
+    private static final int MAX_CLIENT_ENTRIES = 512;
 
     private NetworkStorage()
     {
@@ -38,13 +36,11 @@ public final class NetworkStorage
             {
                 continue;
             }
-            entries.add(new StorageEntry(itemKey.copyStack(), stored.amount()));
+            long insertedTime = storage.getCreationTimeMap().getOrDefault(stored.key(), 0L);
+            long modifiedTime = storage.getLastModifiedTimeMap().getOrDefault(stored.key(), 0L);
+            entries.add(new StorageEntry(itemKey.copyStack(), stored.amount(), insertedTime, modifiedTime));
         }
 
-        entries.sort(Comparator.comparing(entry -> {
-            var key = BuiltInRegistries.ITEM.getKey(entry.stack().getItem());
-            return key == null ? "" : key.toString();
-        }));
         if (entries.size() > MAX_CLIENT_ENTRIES)
         {
             entries = new ArrayList<>(entries.subList(0, MAX_CLIENT_ENTRIES));

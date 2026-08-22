@@ -1,71 +1,95 @@
 package net.xuwu.betterbeyonddimensions.client;
 
+import com.wintercogs.beyonddimensions.api.ButtonState;
+import com.wintercogs.beyonddimensions.client.gui.CommonTextures;
+import com.wintercogs.beyonddimensions.config.CommonConfigRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.xuwu.betterbeyonddimensions.NetworkHandler;
-import net.xuwu.betterbeyonddimensions.common.StorageEntry;
+import net.xuwu.betterbeyonddimensions.common.StorageSnapshot;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
-/** Draws and handles the lightweight overlay shared by every container screen. */
+/** Renders a compact Beyond Dimensions-style storage view beside vanilla container screens. */
 public final class SidebarRenderer
 {
-    public static final int WIDTH = 164;
-    private static final int HEIGHT = 210;
-    private static final int LIST_TOP = 104;
-    private static final int ROW_HEIGHT = 22;
+    public static final int WIDTH = CommonTextures.COMMON_SLOTS_WIDTH;
+
+    private static final int GRID_TOP = CommonTextures.TOP_BASE_COMMON_HEIGHT
+            + CommonTextures.COMMON_CONNECTION_HEIGHT
+            + 26;
+    private static final int SLOT_COLUMNS = 9;
+    private static final int MAX_VISIBLE_ROWS = 8;
+
+    private static final ClientStorageView STORAGE_VIEW = new ClientStorageView();
+
+    private static StorageSnapshot lastSnapshot;
+    private static String lastSearch = "";
+    private static ButtonState lastPrimarySort;
+    private static ButtonState lastSecondarySort;
+    private static ButtonState lastReverse;
 
     private SidebarRenderer()
     {
     }
 
+    public static int getPanelHeight()
+    {
+        return GRID_TOP + visibleRows() * CommonTextures.COMMON_SLOTS_HEIGHT
+                + CommonTextures.BOTTOM_BASE_COMMON_HEIGHT;
+    }
+
     public static void render(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY, float partialTick)
     {
-        if (!ClientStorageState.available())
+        StorageSnapshot snapshot = ClientStorageState.snapshot();
+        if (!snapshot.available())
         {
             setWidgetsVisible(host, false);
             return;
         }
 
         syncWidgets(host);
+        List<ClientStorageView.Entry> entries = entries(host);
+        int rows = visibleRows();
+        syncScrollState(snapshot, host.bbd$getSearchBox().getValue(), entries.size());
+
         int x = host.bbd$getSidebarX();
         int y = host.bbd$getSidebarY();
-        int height = host.bbd$getSidebarHeight();
         Font font = Minecraft.getInstance().font;
 
-        graphics.fill(x, y, x + WIDTH, y + height, 0xE9101520);
-        graphics.fill(x, y, x + WIDTH, y + 1, 0xFF6C8DB7);
-        graphics.fill(x, y + height - 1, x + WIDTH, y + height, 0xFF26354D);
-        graphics.drawString(font, Component.literal("超越维度"), x + 6, y + 5, 0xFFFFFF, true);
+        drawBackground(graphics, x, y, rows);
+        String networkName = snapshot.networkName().isEmpty() ? "超越维度" : snapshot.networkName();
+        graphics.drawString(font, trim(font, networkName, 50), x + 5, y + 7, 0xFF404040, false);
 
-        String networkName = ClientStorageState.snapshot().networkName();
-        graphics.drawString(font, trim(font, networkName, WIDTH - 12), x + 6, y + 17, 0xFF9BB9E6, false);
-
-        List<StorageEntry> entries = visibleEntries(host.bbd$getSearchBox());
-        int rows = Math.max(1, (height - LIST_TOP - 5) / ROW_HEIGHT);
-        for (int index = 0; index < Math.min(rows, entries.size()); index++)
+        int firstEntry = ClientStorageState.scrollRow() * SLOT_COLUMNS;
+        for (int row = 0; row < rows; row++)
         {
-            StorageEntry entry = entries.get(index);
-            int rowY = y + LIST_TOP + index * ROW_HEIGHT;
-            boolean hovered = mouseX >= x && mouseX < x + WIDTH && mouseY >= rowY && mouseY < rowY + ROW_HEIGHT;
-            if (hovered)
+            for (int col = 0; col < SLOT_COLUMNS; col++)
             {
-                graphics.fill(x + 2, rowY, x + WIDTH - 2, rowY + ROW_HEIGHT - 1, 0xFF304B70);
-            }
+                int entryIndex = firstEntry + row * SLOT_COLUMNS + col;
+                if (entryIndex < 0 || entryIndex >= entries.size())
+                {
+                    continue;
+                }
 
-            ItemStack stack = entry.stack();
-            graphics.renderItem(stack, x + 5, rowY + 2);
-            graphics.drawString(font, trim(font, stack.getHoverName().getString(), WIDTH - 38), x + 27, rowY + 3, 0xF2F2F2, false);
-            graphics.drawString(font, formatAmount(entry.amount()), x + 27, rowY + 12, 0xFFB7C8E8, false);
+                ClientStorageView.Entry entry = entries.get(entryIndex);
+                int slotX = x + 8 + col * 18;
+                int slotY = y + GRID_TOP + row * 18 + 1;
+                if (isHovered(x, y, mouseX, mouseY, row, col))
+                {
+                    graphics.fill(slotX, slotY, slotX + 16, slotY + 16, 0x80FFFFFF);
+                }
+
+                ItemStack stack = entry.key().getRenderStack();
+                graphics.renderFakeItem(stack, slotX, slotY);
+                graphics.renderItemDecorations(font, stack, slotX, slotY, "");
+                entry.key().getRender().renderAmount(graphics, entry.amount(), slotX, slotY);
+            }
         }
 
         renderWidgets(host, graphics, mouseX, mouseY, partialTick);
@@ -73,30 +97,46 @@ public final class SidebarRenderer
 
     public static boolean handleClick(SidebarScreenAccess host, double mouseX, double mouseY, int button)
     {
-        if (!ClientStorageState.available())
+        if (!ClientStorageState.available() || (button != 0 && button != 1))
+        {
+            return false;
+        }
+
+        List<ClientStorageView.Entry> entries = entries(host);
+        int index = entryIndexAt(host, mouseX, mouseY, entries.size());
+        if (index < 0)
+        {
+            return false;
+        }
+
+        ClientStorageView.Entry entry = entries.get(index);
+        int stackAmount = Math.max(1, entry.key().getRenderStack().getMaxStackSize());
+        int amount = button == 0 ? stackAmount : Math.max(1, (stackAmount + 1) / 2);
+        NetworkHandler.withdraw(entry.key().getRenderStack(), amount);
+        return true;
+    }
+
+    public static boolean handleScroll(SidebarScreenAccess host, double mouseX, double mouseY, double scrollAmount)
+    {
+        if (!ClientStorageState.available() || scrollAmount == 0.0D)
         {
             return false;
         }
 
         int x = host.bbd$getSidebarX();
         int y = host.bbd$getSidebarY();
-        int height = host.bbd$getSidebarHeight();
-        if (mouseX < x || mouseX >= x + WIDTH || mouseY < y + LIST_TOP || mouseY >= y + height)
+        int rows = visibleRows();
+        if (mouseX < x || mouseX >= x + WIDTH || mouseY < y + GRID_TOP
+                || mouseY >= y + GRID_TOP + rows * CommonTextures.COMMON_SLOTS_HEIGHT)
         {
             return false;
         }
 
-        int index = (int) ((mouseY - y - LIST_TOP) / ROW_HEIGHT);
-        List<StorageEntry> entries = visibleEntries(host.bbd$getSearchBox());
-        int rows = Math.max(1, (height - LIST_TOP - 5) / ROW_HEIGHT);
-        if (index < 0 || index >= rows || index >= entries.size())
-        {
-            return false;
-        }
-
-        StorageEntry entry = entries.get(index);
-        // Left click extracts one vanilla stack; right click extracts one item.
-        NetworkHandler.withdraw(entry.stack(), button == 1 ? 1 : 64);
+        List<ClientStorageView.Entry> entries = entries(host);
+        int totalRows = (entries.size() + SLOT_COLUMNS - 1) / SLOT_COLUMNS;
+        int maxScroll = Math.max(0, totalRows - rows);
+        int direction = scrollAmount > 0.0D ? -1 : 1;
+        ClientStorageState.setScrollRow(Math.max(0, Math.min(maxScroll, ClientStorageState.scrollRow() + direction)));
         return true;
     }
 
@@ -106,28 +146,55 @@ public final class SidebarRenderer
         {
             return;
         }
-        int x = host.bbd$getSidebarX();
-        int y = host.bbd$getSidebarY();
-        int height = host.bbd$getSidebarHeight();
-        if (mouseX < x || mouseX >= x + WIDTH || mouseY < y + LIST_TOP || mouseY >= y + height)
+
+        List<ClientStorageView.Entry> entries = entries(host);
+        int index = entryIndexAt(host, mouseX, mouseY, entries.size());
+        if (index >= 0)
         {
-            return;
+            ClientStorageView.Entry entry = entries.get(index);
+            entry.key().getRender().renderTooltip(
+                    graphics,
+                    Minecraft.getInstance().font,
+                    entry.key(),
+                    entry.amount(),
+                    mouseX,
+                    mouseY
+            );
         }
-        int index = (int) ((mouseY - y - LIST_TOP) / ROW_HEIGHT);
-        List<StorageEntry> entries = visibleEntries(host.bbd$getSearchBox());
-        int rows = Math.max(1, (height - LIST_TOP - 5) / ROW_HEIGHT);
-        if (index < 0 || index >= rows || index >= entries.size())
+    }
+
+    private static void drawBackground(GuiGraphics graphics, int x, int y, int rows)
+    {
+        graphics.blit(CommonTextures.TOP_BASE_COMMON, x, y, 0, 0,
+                CommonTextures.TOP_BASE_COMMON_WIDTH, CommonTextures.TOP_BASE_COMMON_HEIGHT,
+                CommonTextures.TOP_BASE_COMMON_WIDTH, CommonTextures.TOP_BASE_COMMON_HEIGHT);
+        graphics.blit(CommonTextures.COMMON_CONNECTION, x, y + CommonTextures.TOP_BASE_COMMON_HEIGHT, 0, 0,
+                CommonTextures.COMMON_CONNECTION_WIDTH, CommonTextures.COMMON_CONNECTION_HEIGHT,
+                CommonTextures.COMMON_CONNECTION_WIDTH, CommonTextures.COMMON_CONNECTION_HEIGHT);
+
+        int controlsTop = y + CommonTextures.TOP_BASE_COMMON_HEIGHT + CommonTextures.COMMON_CONNECTION_HEIGHT;
+        graphics.fill(x, controlsTop, x + WIDTH, y + GRID_TOP, 0xFFC6C6C6);
+
+        for (int row = 0; row < rows; row++)
         {
-            return;
+            int rowY = y + GRID_TOP + row * CommonTextures.COMMON_SLOTS_HEIGHT;
+            graphics.blit(CommonTextures.COMMON_SLOTS, x, rowY, 0, 0,
+                    CommonTextures.COMMON_SLOTS_WIDTH, CommonTextures.COMMON_SLOTS_HEIGHT,
+                    CommonTextures.COMMON_SLOTS_WIDTH, CommonTextures.COMMON_SLOTS_HEIGHT);
         }
-        graphics.renderTooltip(Minecraft.getInstance().font, entries.get(index).stack(), mouseX, mouseY);
+
+        int bottomY = y + GRID_TOP + rows * CommonTextures.COMMON_SLOTS_HEIGHT;
+        graphics.blit(CommonTextures.BOTTOM_BASE_COMMON, x, bottomY, 0, 0,
+                CommonTextures.BOTTOM_BASE_COMMON_WIDTH, CommonTextures.BOTTOM_BASE_COMMON_HEIGHT,
+                CommonTextures.BOTTOM_BASE_COMMON_WIDTH, CommonTextures.BOTTOM_BASE_COMMON_HEIGHT);
     }
 
     private static void syncWidgets(SidebarScreenAccess host)
     {
         setWidgetsVisible(host, true);
-        boolean player = ClientStorageState.snapshot().shiftPlayerInventory();
-        boolean container = ClientStorageState.snapshot().shiftContainer();
+        StorageSnapshot snapshot = ClientStorageState.snapshot();
+        boolean player = snapshot.shiftPlayerInventory();
+        boolean container = snapshot.shiftContainer();
         host.bbd$getPlayerShiftButton().setMessage(Component.literal("玩家移入:" + (player ? "开" : "关")));
         host.bbd$getContainerShiftButton().setMessage(Component.literal("容器移入:" + (container ? "开" : "关")));
     }
@@ -153,10 +220,6 @@ public final class SidebarRenderer
 
     private static void renderWidgets(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY, float partialTick)
     {
-        if (!ClientStorageState.available())
-        {
-            return;
-        }
         host.bbd$getSearchBox().render(graphics, mouseX, mouseY, partialTick);
         host.bbd$getPlayerShiftButton().render(graphics, mouseX, mouseY, partialTick);
         host.bbd$getContainerShiftButton().render(graphics, mouseX, mouseY, partialTick);
@@ -164,43 +227,64 @@ public final class SidebarRenderer
         host.bbd$getDepositPlayerButton().render(graphics, mouseX, mouseY, partialTick);
     }
 
-    private static List<StorageEntry> visibleEntries(EditBox searchBox)
+    private static List<ClientStorageView.Entry> entries(SidebarScreenAccess host)
     {
-        String query = searchBox.getValue().trim().toLowerCase(Locale.ROOT);
-        if (query.isEmpty())
-        {
-            return ClientStorageState.entries();
-        }
-
-        List<StorageEntry> result = new ArrayList<>();
-        for (StorageEntry entry : ClientStorageState.entries())
-        {
-            String name = entry.stack().getHoverName().getString().toLowerCase(Locale.ROOT);
-            ResourceLocation id = BuiltInRegistries.ITEM.getKey(entry.stack().getItem());
-            String registryName = id == null ? "" : id.toString().toLowerCase(Locale.ROOT);
-            if (name.contains(query) || registryName.contains(query))
-            {
-                result.add(entry);
-            }
-        }
-        return result;
+        return STORAGE_VIEW.entries(ClientStorageState.snapshot(), host.bbd$getSearchBox().getValue());
     }
 
-    private static String formatAmount(long amount)
+    private static int entryIndexAt(SidebarScreenAccess host, double mouseX, double mouseY, int entryCount)
     {
-        if (amount >= 1_000_000_000L)
+        int x = host.bbd$getSidebarX();
+        int y = host.bbd$getSidebarY();
+        int rows = visibleRows();
+        if (mouseX < x + 7 || mouseX >= x + WIDTH - 7
+                || mouseY < y + GRID_TOP || mouseY >= y + GRID_TOP + rows * 18)
         {
-            return String.format(Locale.ROOT, "%.1fG", amount / 1_000_000_000.0D);
+            return -1;
         }
-        if (amount >= 1_000_000L)
+
+        int col = (int) ((mouseX - (x + 7)) / 18.0D);
+        int row = (int) ((mouseY - (y + GRID_TOP)) / 18.0D);
+        if (col < 0 || col >= SLOT_COLUMNS || row < 0 || row >= rows)
         {
-            return String.format(Locale.ROOT, "%.1fM", amount / 1_000_000.0D);
+            return -1;
         }
-        if (amount >= 1_000L)
+
+        int index = (ClientStorageState.scrollRow() + row) * SLOT_COLUMNS + col;
+        return index >= 0 && index < entryCount ? index : -1;
+    }
+
+    private static boolean isHovered(int x, int y, double mouseX, double mouseY, int row, int col)
+    {
+        int slotX = x + 8 + col * 18;
+        int slotY = y + GRID_TOP + row * 18 + 1;
+        return mouseX >= slotX - 1 && mouseX < slotX + 17
+                && mouseY >= slotY - 1 && mouseY < slotY + 17;
+    }
+
+    private static int visibleRows()
+    {
+        return Math.max(2, Math.min(MAX_VISIBLE_ROWS, CommonConfigRuntime.uiPageNum));
+    }
+
+    private static void syncScrollState(StorageSnapshot snapshot, String search, int entryCount)
+    {
+        ButtonState primary = CommonConfigRuntime.uiSortButton;
+        ButtonState secondary = CommonConfigRuntime.uiSecondSortButton;
+        ButtonState reverse = CommonConfigRuntime.uiReverseButton;
+        if (snapshot != lastSnapshot || !search.equals(lastSearch)
+                || primary != lastPrimarySort || secondary != lastSecondarySort || reverse != lastReverse)
         {
-            return String.format(Locale.ROOT, "%.1fk", amount / 1_000.0D);
+            ClientStorageState.resetScroll();
+            lastSnapshot = snapshot;
+            lastSearch = search;
+            lastPrimarySort = primary;
+            lastSecondarySort = secondary;
+            lastReverse = reverse;
         }
-        return Long.toString(amount);
+
+        int maxScroll = Math.max(0, (entryCount + SLOT_COLUMNS - 1) / SLOT_COLUMNS - visibleRows());
+        ClientStorageState.setScrollRow(Math.min(ClientStorageState.scrollRow(), maxScroll));
     }
 
     private static String trim(Font font, String value, int maxWidth)
