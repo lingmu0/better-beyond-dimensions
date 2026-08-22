@@ -19,6 +19,10 @@ public interface SidebarScreenAccess
 
     ItemStack bbd$getCarried();
 
+    void bbd$markSidebarMouseRelease();
+
+    boolean bbd$consumeSidebarMouseRelease();
+
     int bbd$getSidebarX();
 
     int bbd$getSidebarY();

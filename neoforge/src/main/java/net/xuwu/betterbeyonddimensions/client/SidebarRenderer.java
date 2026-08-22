@@ -116,8 +116,45 @@ public final class SidebarRenderer
         ItemStack stack = index < entries.size()
                 ? entries.get(index).key().getRenderStack()
                 : ItemStack.EMPTY;
-        NetworkHandler.clickSidebar(stack, button);
+        if (Screen.hasShiftDown() && !stack.isEmpty() && index < entries.size())
+        {
+            long amount = Math.min((long) Integer.MAX_VALUE, Math.max(1L, entries.get(index).amount()));
+            NetworkHandler.withdraw(stack, (int) amount);
+        }
+        else
+        {
+            NetworkHandler.clickSidebar(stack, button);
+        }
         return true;
+    }
+
+    public static boolean handleMouseClick(SidebarScreenAccess host, double mouseX, double mouseY, int button)
+    {
+        EditBox search = host.bbd$getSearchBox();
+        if (search == null)
+        {
+            return false;
+        }
+
+        if (search.visible && search.active && search.isMouseOver(mouseX, mouseY))
+        {
+            if (button == 1)
+            {
+                Screen screen = (Screen) (Object) host;
+                screen.setFocused(search);
+                search.setFocused(true);
+                search.setValue("");
+                return true;
+            }
+            return false;
+        }
+
+        if (search.isFocused())
+        {
+            ((Screen) (Object) host).setFocused(null);
+            search.setFocused(false);
+        }
+        return handleClick(host, mouseX, mouseY, button);
     }
 
     public static boolean handleScroll(SidebarScreenAccess host, double mouseX, double mouseY, double scrollAmount)
