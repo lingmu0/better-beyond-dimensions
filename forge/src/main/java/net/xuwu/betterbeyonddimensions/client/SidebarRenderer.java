@@ -23,6 +23,9 @@ public final class SidebarRenderer
 {
     public static final int SLOT_COLUMNS = 5;
     public static final int WIDTH = SLOT_COLUMNS * 18 + 14;
+    public static final int SEARCH_LEFT = 4;
+    public static final int TOGGLE_WIDTH = 12;
+    public static final int CONTROL_GAP = 3;
 
     private static final int GRID_TOP = CommonTextures.TOP_BASE_COMMON_HEIGHT
             + CommonTextures.COMMON_CONNECTION_HEIGHT
@@ -55,6 +58,16 @@ public final class SidebarRenderer
     public static int getVisibleRows()
     {
         return visibleRows();
+    }
+
+    public static int getSearchWidth()
+    {
+        return WIDTH - SEARCH_LEFT - TOGGLE_WIDTH - CONTROL_GAP * 2;
+    }
+
+    public static int getToggleX(int sidebarX)
+    {
+        return sidebarX + WIDTH - TOGGLE_WIDTH - CONTROL_GAP;
     }
 
     /** Updates the real menu Slots before vanilla starts rendering its container slots. */
