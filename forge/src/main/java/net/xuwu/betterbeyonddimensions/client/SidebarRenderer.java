@@ -29,7 +29,7 @@ public final class SidebarRenderer
 
     private static final int GRID_TOP = CommonTextures.TOP_BASE_COMMON_HEIGHT
             + CommonTextures.COMMON_CONNECTION_HEIGHT
-            + 18;
+            + 22;
     public static final int MAX_VISIBLE_ROWS = 8;
 
     private static final ClientStorageView STORAGE_VIEW = new ClientStorageView();
@@ -48,6 +48,11 @@ public final class SidebarRenderer
     {
         return GRID_TOP + visibleRows() * CommonTextures.COMMON_SLOTS_HEIGHT
                 + CommonTextures.BOTTOM_BASE_COMMON_HEIGHT;
+    }
+
+    public static int getPanelHeight(SidebarScreenAccess host)
+    {
+        return Math.max(getPanelHeight(), host.bbd$getSidebarHeight());
     }
 
     public static int getGridTop()
@@ -114,7 +119,7 @@ public final class SidebarRenderer
         int y = host.bbd$getSidebarY();
         Font font = Minecraft.getInstance().font;
 
-        drawBackground(graphics, x, y, rows);
+        drawBackground(graphics, x, y, rows, getPanelHeight(host));
         String networkName = snapshot.networkName().isEmpty() ? "超越维度" : snapshot.networkName();
         graphics.drawString(font, trim(font, networkName, 50), x + 5, y + 7, 0xFF404040, false);
 
@@ -276,7 +281,7 @@ public final class SidebarRenderer
         }
     }
 
-    private static void drawBackground(GuiGraphics graphics, int x, int y, int rows)
+    private static void drawBackground(GuiGraphics graphics, int x, int y, int rows, int panelHeight)
     {
         blitCropped(graphics, CommonTextures.TOP_BASE_COMMON, x, y,
                 CommonTextures.TOP_BASE_COMMON_HEIGHT, CommonTextures.TOP_BASE_COMMON_WIDTH,
@@ -294,7 +299,12 @@ public final class SidebarRenderer
             blitSlotRow(graphics, x, rowY);
         }
 
-        int bottomY = y + GRID_TOP + rows * CommonTextures.COMMON_SLOTS_HEIGHT;
+        int contentBottom = y + GRID_TOP + rows * CommonTextures.COMMON_SLOTS_HEIGHT;
+        int bottomY = Math.max(contentBottom, y + panelHeight - CommonTextures.BOTTOM_BASE_COMMON_HEIGHT);
+        if (bottomY > contentBottom)
+        {
+            fillPanelRegion(graphics, x, contentBottom, bottomY);
+        }
         blitCropped(graphics, CommonTextures.BOTTOM_BASE_COMMON, x, bottomY,
                 CommonTextures.BOTTOM_BASE_COMMON_HEIGHT, CommonTextures.BOTTOM_BASE_COMMON_WIDTH,
                 CommonTextures.BOTTOM_BASE_COMMON_HEIGHT);
