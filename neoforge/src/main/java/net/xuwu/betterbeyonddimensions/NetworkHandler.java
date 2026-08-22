@@ -15,6 +15,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import net.xuwu.betterbeyonddimensions.client.ClientStorageState;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorage;
+import net.xuwu.betterbeyonddimensions.common.RecipeFill;
 import net.xuwu.betterbeyonddimensions.common.StorageActions;
 import net.xuwu.betterbeyonddimensions.common.StorageEntry;
 import net.xuwu.betterbeyonddimensions.common.StorageSnapshot;
@@ -44,6 +45,8 @@ public final class NetworkHandler
                 new DirectionalPayloadHandler<>(WithdrawPacket::handle, WithdrawPacket::handle));
         registrar.playBidirectional(SidebarClickPacket.TYPE, SidebarClickPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(SidebarClickPacket::handle, SidebarClickPacket::handle));
+        registrar.playBidirectional(RecipeFillPacket.TYPE, RecipeFillPacket.STREAM_CODEC,
+                new DirectionalPayloadHandler<>(RecipeFillPacket::handle, RecipeFillPacket::handle));
     }
 
     public static void requestSnapshot()
@@ -86,6 +89,15 @@ public final class NetworkHandler
             request.setCount(1);
         }
         PacketDistributor.sendToServer(new SidebarClickPacket(request, button));
+    }
+
+    public static void fillRecipe(List<RecipeFill> fills)
+    {
+        if (fills == null || fills.isEmpty())
+        {
+            return;
+        }
+        PacketDistributor.sendToServer(new RecipeFillPacket(fills));
     }
 
     public static void sendSnapshot(ServerPlayer player)
@@ -296,6 +308,64 @@ public final class NetworkHandler
                     if (context.player() instanceof ServerPlayer player)
                     {
                         StorageActions.clickSidebar(player, packet.stack, packet.button);
+                        sendSnapshot(player);
+                    }
+                });
+            }
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type()
+        {
+            return TYPE;
+        }
+    }
+
+    private record RecipeFillPacket(List<RecipeFill> fills) implements CustomPacketPayload
+    {
+        private static final Type<RecipeFillPacket> TYPE = new Type<>(BetterBeyondDimensions.id("recipe_fill"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, RecipeFillPacket> STREAM_CODEC = new StreamCodec<>()
+        {
+            @Override
+            public void encode(RegistryFriendlyByteBuf buffer, RecipeFillPacket packet)
+            {
+                List<RecipeFill> values = packet.fills == null ? List.of() : packet.fills;
+                int count = Math.min(64, values.size());
+                buffer.writeVarInt(count);
+                for (int index = 0; index < count; index++)
+                {
+                    RecipeFill fill = values.get(index);
+                    buffer.writeVarInt(fill.slotId());
+                    ItemStack.OPTIONAL_STREAM_CODEC.encode(buffer, fill.stack());
+                    buffer.writeVarInt(Math.min(64, fill.amount()));
+                }
+            }
+
+            @Override
+            public RecipeFillPacket decode(RegistryFriendlyByteBuf buffer)
+            {
+                int count = Math.min(64, Math.max(0, buffer.readVarInt()));
+                List<RecipeFill> fills = new ArrayList<>(count);
+                for (int index = 0; index < count; index++)
+                {
+                    fills.add(new RecipeFill(
+                            buffer.readVarInt(),
+                            ItemStack.OPTIONAL_STREAM_CODEC.decode(buffer),
+                            Math.min(64, Math.max(0, buffer.readVarInt()))
+                    ));
+                }
+                return new RecipeFillPacket(fills);
+            }
+        };
+
+        private static void handle(RecipeFillPacket packet, IPayloadContext context)
+        {
+            if (context.flow() == PacketFlow.SERVERBOUND)
+            {
+                context.enqueueWork(() -> {
+                    if (context.player() instanceof ServerPlayer player)
+                    {
+                        StorageActions.fillRecipe(player, packet.fills);
                         sendSnapshot(player);
                     }
                 });
