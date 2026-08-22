@@ -10,6 +10,7 @@ group = mod_group_id
 
 repositories {
     mavenLocal()
+    maven { url = 'https://maven.blamejared.com' }
 }
 
 base {
@@ -102,6 +103,9 @@ sourceSets.main.resources { srcDir 'src/generated/resources' }
 dependencies {
     // Beyond Dimensions exposes the DimensionsNet and UnifiedStorage APIs used by the add-on.
     implementation files("libs/beyonddimensions-1.21.1-neoforge-0.7.27.jar")
+
+    // Test-environment-only JEI; it is not included in the published mod.
+    runtimeOnly "mezz.jei:jei-${minecraft_version}-neoforge:${jei_version}"
 
     // Example mod dependency with JEI
     // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
