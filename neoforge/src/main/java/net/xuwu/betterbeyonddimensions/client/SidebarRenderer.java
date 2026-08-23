@@ -151,6 +151,18 @@ public final class SidebarRenderer
             return false;
         }
 
+        Button toggle = host.bbd$getSidebarToggleButton();
+        if (button == 0 && toggle.visible && toggle.active && toggle.isMouseOver(mouseX, mouseY))
+        {
+            if (search.isFocused())
+            {
+                ((Screen) (Object) host).setFocused(null);
+                search.setFocused(false);
+            }
+            host.bbd$beginSidebarDrag(mouseX, mouseY);
+            return true;
+        }
+
         if (search.visible && search.active && search.isMouseOver(mouseX, mouseY))
         {
             if (button == 0 || button == 1)
@@ -181,6 +193,33 @@ public final class SidebarRenderer
         return false;
     }
 
+    public static boolean handleMouseDrag(SidebarScreenAccess host, double mouseX, double mouseY, int button)
+    {
+        if (button != 0 || !host.bbd$isSidebarDragging())
+        {
+            return false;
+        }
+
+        host.bbd$dragSidebarTo(mouseX, mouseY);
+        return true;
+    }
+
+    public static boolean handleMouseRelease(SidebarScreenAccess host, double mouseX, double mouseY, int button)
+    {
+        if (button == 0 && host.bbd$isSidebarDragging())
+        {
+            boolean dragged = host.bbd$endSidebarDrag(mouseX, mouseY);
+            host.bbd$consumeSidebarMouseRelease();
+            if (!dragged)
+            {
+                host.bbd$toggleSidebarVisibility();
+            }
+            return true;
+        }
+
+        return host.bbd$consumeSidebarMouseRelease();
+    }
+
     public static boolean handleScroll(SidebarScreenAccess host, double mouseX, double mouseY, double scrollAmount)
     {
         if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || scrollAmount == 0.0D)
@@ -208,14 +247,22 @@ public final class SidebarRenderer
     public static void renderTooltip(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY)
     {
         renderButtonTooltip(host, mouseX, mouseY);
-        if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || !host.bbd$getCarried().isEmpty())
+    }
+
+    /**
+     * Replaces vanilla's ItemStack tooltip with Beyond Dimensions' native typed-stack tooltip.
+     * Calling this from the container's normal tooltip phase avoids duplicate tooltip passes.
+     */
+    public static boolean renderStorageTooltip(SidebarScreenAccess host, GuiGraphics graphics,
+                                               int mouseX, int mouseY)
+    {
+        if (!ClientStorageState.available() || host.bbd$isSidebarHidden()
+                || !host.bbd$getCarried().isEmpty())
         {
-            return;
+            return false;
         }
 
-        List<ClientStorageView.Entry> entries = entries(host);
-        host.bbd$updateSidebarSlots(entries);
-        NetworkStorageSlot slot = slotAt(host, mouseX, mouseY);
+        NetworkStorageSlot slot = findSlotAt(host, mouseX, mouseY);
         if (slot != null && slot.hasItem() && slot.getKey() != null)
         {
             slot.getKey().getRender().renderTooltip(
@@ -226,7 +273,9 @@ public final class SidebarRenderer
                     mouseX,
                     mouseY
             );
+            return true;
         }
+        return false;
     }
 
     private static void renderButtonTooltip(SidebarScreenAccess host, int mouseX, int mouseY)
@@ -395,8 +444,13 @@ public final class SidebarRenderer
         return (ClientStorageState.scrollRow() + row) * SLOT_COLUMNS + col;
     }
 
-    private static NetworkStorageSlot slotAt(SidebarScreenAccess host, double mouseX, double mouseY)
+    public static NetworkStorageSlot findSlotAt(SidebarScreenAccess host, double mouseX, double mouseY)
     {
+        if (!ClientStorageState.available() || host.bbd$isSidebarHidden())
+        {
+            return null;
+        }
+
         int storageIndex = cellIndexAt(host, mouseX, mouseY);
         if (storageIndex < 0)
         {
@@ -409,8 +463,9 @@ public final class SidebarRenderer
         {
             return null;
         }
-        NetworkStorageSlot slot = slots.get(visualIndex);
-        return slot.isActive() ? slot : null;
+        // Empty visible cells must still be real hit targets. Returning null makes vanilla
+        // treat the click as outside the menu and drop the carried stack into the world.
+        return slots.get(visualIndex);
     }
 
     private static boolean isHovered(int x, int y, double mouseX, double mouseY, int row, int col)

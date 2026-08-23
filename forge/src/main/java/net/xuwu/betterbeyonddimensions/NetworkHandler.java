@@ -1,6 +1,7 @@
 package net.xuwu.betterbeyonddimensions;
 
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.api.distmarker.Dist;
@@ -12,6 +13,7 @@ import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 import net.xuwu.betterbeyonddimensions.client.ClientStorageState;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorage;
+import net.xuwu.betterbeyonddimensions.common.RecipeFill;
 import net.xuwu.betterbeyonddimensions.common.StorageActions;
 import net.xuwu.betterbeyonddimensions.common.StorageEntry;
 import net.xuwu.betterbeyonddimensions.common.StorageSnapshot;
@@ -24,7 +26,7 @@ import java.util.function.Supplier;
 /** Forge 1.20.1 packet channel for sidebar requests and server snapshots. */
 public final class NetworkHandler
 {
-    private static final String PROTOCOL_VERSION = "1";
+    private static final String PROTOCOL_VERSION = "2";
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             BetterBeyondDimensions.id("main"),
             () -> PROTOCOL_VERSION,
@@ -73,6 +75,59 @@ public final class NetworkHandler
                 buffer -> new SidebarClickPacket(buffer.readItem(), buffer.readVarInt()),
                 NetworkHandler::handleSidebarClick,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, SidebarMenuClickPacket.class,
+                (packet, buffer) -> {
+                    buffer.writeVarInt(packet.slotId);
+                    buffer.writeVarInt(packet.button);
+                    buffer.writeVarInt(packet.clickType);
+                },
+                buffer -> new SidebarMenuClickPacket(buffer.readVarInt(), buffer.readVarInt(), buffer.readVarInt()),
+                NetworkHandler::handleSidebarMenuClick,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, SidebarViewPacket.class,
+                (packet, buffer) -> {
+                    int count = Math.min(40, packet.stacks.size());
+                    buffer.writeVarInt(count);
+                    for (int index = 0; index < count; index++)
+                    {
+                        buffer.writeItem(packet.stacks.get(index));
+                    }
+                },
+                buffer -> {
+                    int count = Math.min(40, Math.max(0, buffer.readVarInt()));
+                    List<ItemStack> stacks = new ArrayList<>(count);
+                    for (int index = 0; index < count; index++)
+                    {
+                        stacks.add(buffer.readItem());
+                    }
+                    return new SidebarViewPacket(stacks);
+                },
+                NetworkHandler::handleSidebarView,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, RecipeFillPacket.class,
+                (packet, buffer) -> {
+                    int count = Math.min(64, packet.fills.size());
+                    buffer.writeVarInt(count);
+                    for (int index = 0; index < count; index++)
+                    {
+                        RecipeFill fill = packet.fills.get(index);
+                        buffer.writeVarInt(fill.slotId());
+                        buffer.writeItem(fill.stack());
+                        buffer.writeVarInt(Math.min(64, fill.amount()));
+                    }
+                },
+                buffer -> {
+                    int count = Math.min(64, Math.max(0, buffer.readVarInt()));
+                    List<RecipeFill> fills = new ArrayList<>(count);
+                    for (int index = 0; index < count; index++)
+                    {
+                        fills.add(new RecipeFill(buffer.readVarInt(), buffer.readItem(),
+                                Math.min(64, Math.max(0, buffer.readVarInt()))));
+                    }
+                    return new RecipeFillPacket(fills);
+                },
+                NetworkHandler::handleRecipeFill,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
     }
 
     public static void requestSnapshot()
@@ -88,6 +143,13 @@ public final class NetworkHandler
     public static void toggleContainerShift()
     {
         CHANNEL.sendToServer(new TogglePacket(StorageActions.TOGGLE_CONTAINER_SHIFT));
+    }
+
+    public static void setSidebarHidden(boolean hidden)
+    {
+        CHANNEL.sendToServer(new TogglePacket(hidden
+                ? StorageActions.HIDE_SIDEBAR
+                : StorageActions.SHOW_SIDEBAR));
     }
 
     public static void depositContainer()
@@ -115,6 +177,34 @@ public final class NetworkHandler
             request.setCount(1);
         }
         CHANNEL.sendToServer(new SidebarClickPacket(request, button));
+    }
+
+    public static void clickSidebarSlot(int slotId, int button, ClickType clickType)
+    {
+        CHANNEL.sendToServer(new SidebarMenuClickPacket(slotId, button, clickType.ordinal()));
+    }
+
+    public static void updateSidebarView(List<ItemStack> stacks)
+    {
+        List<ItemStack> values = new ArrayList<>(Math.min(40, stacks == null ? 0 : stacks.size()));
+        if (stacks != null)
+        {
+            for (int index = 0; index < Math.min(40, stacks.size()); index++)
+            {
+                ItemStack stack = stacks.get(index);
+                values.add(stack == null ? ItemStack.EMPTY : stack.copy());
+            }
+        }
+        CHANNEL.sendToServer(new SidebarViewPacket(values));
+    }
+
+    public static void fillRecipe(List<RecipeFill> fills)
+    {
+        if (fills == null || fills.isEmpty())
+        {
+            return;
+        }
+        CHANNEL.sendToServer(new RecipeFillPacket(List.copyOf(fills)));
     }
 
     private static void handleRequestSnapshot(RequestSnapshotPacket packet, Supplier<NetworkEvent.Context> contextSupplier)
@@ -202,8 +292,56 @@ public final class NetworkHandler
         context.setPacketHandled(true);
     }
 
+    private static void handleSidebarMenuClick(SidebarMenuClickPacket packet,
+                                               Supplier<NetworkEvent.Context> contextSupplier)
+    {
+        NetworkEvent.Context context = contextSupplier.get();
+        context.enqueueWork(() -> {
+            ServerPlayer player = context.getSender();
+            if (player == null)
+            {
+                return;
+            }
+            ClickType[] values = ClickType.values();
+            int typeIndex = Math.max(0, Math.min(values.length - 1, packet.clickType));
+            StorageActions.handleSidebarClick(player, packet.slotId, packet.button, values[typeIndex]);
+            sendSnapshot(player);
+        });
+        context.setPacketHandled(true);
+    }
+
+    private static void handleSidebarView(SidebarViewPacket packet,
+                                          Supplier<NetworkEvent.Context> contextSupplier)
+    {
+        NetworkEvent.Context context = contextSupplier.get();
+        context.enqueueWork(() -> {
+            ServerPlayer player = context.getSender();
+            if (player != null)
+            {
+                StorageActions.updateSidebarView(player, packet.stacks);
+            }
+        });
+        context.setPacketHandled(true);
+    }
+
+    private static void handleRecipeFill(RecipeFillPacket packet,
+                                         Supplier<NetworkEvent.Context> contextSupplier)
+    {
+        NetworkEvent.Context context = contextSupplier.get();
+        context.enqueueWork(() -> {
+            ServerPlayer player = context.getSender();
+            if (player != null)
+            {
+                StorageActions.fillRecipe(player, packet.fills);
+                sendSnapshot(player);
+            }
+        });
+        context.setPacketHandled(true);
+    }
+
     public static void sendSnapshot(ServerPlayer player)
     {
+        StorageActions.refreshSidebarSlots(player);
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new SnapshotPacket(NetworkStorage.snapshot(player)));
     }
 
@@ -214,6 +352,7 @@ public final class NetworkHandler
         buffer.writeUtf(snapshot.networkName(), 256);
         buffer.writeBoolean(snapshot.shiftPlayerInventory());
         buffer.writeBoolean(snapshot.shiftContainer());
+        buffer.writeBoolean(snapshot.sidebarHidden());
         buffer.writeVarInt(snapshot.entries().size());
         for (StorageEntry entry : snapshot.entries())
         {
@@ -230,13 +369,15 @@ public final class NetworkHandler
         String networkName = buffer.readUtf(256);
         boolean shiftPlayer = buffer.readBoolean();
         boolean shiftContainer = buffer.readBoolean();
+        boolean sidebarHidden = buffer.readBoolean();
         int count = Math.min(512, Math.max(0, buffer.readVarInt()));
         List<StorageEntry> entries = new ArrayList<>(count);
         for (int index = 0; index < count; index++)
         {
             entries.add(new StorageEntry(buffer.readItem(), buffer.readLong(), buffer.readLong(), buffer.readLong()));
         }
-        return new SnapshotPacket(new StorageSnapshot(available, networkName, shiftPlayer, shiftContainer, entries));
+        return new SnapshotPacket(new StorageSnapshot(available, networkName, shiftPlayer, shiftContainer,
+                sidebarHidden, entries));
     }
 
     private static final class RequestSnapshotPacket
@@ -294,6 +435,40 @@ public final class NetworkHandler
         {
             this.stack = stack;
             this.button = button;
+        }
+    }
+
+    private static final class SidebarMenuClickPacket
+    {
+        private final int slotId;
+        private final int button;
+        private final int clickType;
+
+        private SidebarMenuClickPacket(int slotId, int button, int clickType)
+        {
+            this.slotId = slotId;
+            this.button = button;
+            this.clickType = clickType;
+        }
+    }
+
+    private static final class SidebarViewPacket
+    {
+        private final List<ItemStack> stacks;
+
+        private SidebarViewPacket(List<ItemStack> stacks)
+        {
+            this.stacks = stacks == null ? List.of() : List.copyOf(stacks);
+        }
+    }
+
+    private static final class RecipeFillPacket
+    {
+        private final List<RecipeFill> fills;
+
+        private RecipeFillPacket(List<RecipeFill> fills)
+        {
+            this.fills = fills == null ? List.of() : List.copyOf(fills);
         }
     }
 }

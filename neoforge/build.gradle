@@ -38,8 +38,18 @@ neoForge {
     // Default run configurations.
     // These can be tweaked, removed, or duplicated as needed.
     runs {
-        client {
+        client1 {
             client()
+            programArgument '--username'
+            programArgument 'Dev'
+
+            // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        client2 {
+            client()
+            programArgument '--username'
+            programArgument 'Dev2'
 
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
@@ -47,7 +57,7 @@ neoForge {
 
         server {
             server()
-            programArgument '--nogui'
+            //programArgument '--nogui'
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
 

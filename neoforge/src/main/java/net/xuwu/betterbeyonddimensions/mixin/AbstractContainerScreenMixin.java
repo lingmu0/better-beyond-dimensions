@@ -15,6 +15,7 @@ import net.minecraft.world.inventory.Slot;
 import net.xuwu.betterbeyonddimensions.NetworkHandler;
 import net.xuwu.betterbeyonddimensions.client.ClientStorageState;
 import net.xuwu.betterbeyonddimensions.client.SidebarRenderer;
+import net.xuwu.betterbeyonddimensions.client.SidebarPositionStore;
 import net.xuwu.betterbeyonddimensions.client.SidebarScreenAccess;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorageMenuAccess;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorageSlot;
@@ -48,28 +49,27 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Unique private Button bbd$sidebarToggleButton;
     @Unique private net.xuwu.betterbeyonddimensions.client.SidebarScrollWidget bbd$scrollWidget;
     @Unique private boolean bbd$consumeSidebarMouseRelease;
-    @Unique private boolean bbd$sidebarHidden;
     @Unique private final List<NetworkStorageSlot> bbd$sidebarSlots = new ArrayList<>();
     @Unique private List<ItemStackKey> bbd$lastSidebarView = List.of();
+    @Unique private int bbd$sidebarX;
+    @Unique private int bbd$sidebarY;
+    @Unique private String bbd$sidebarPositionKey = "";
+    @Unique private boolean bbd$sidebarDragging;
+    @Unique private double bbd$sidebarDragStartMouseX;
+    @Unique private double bbd$sidebarDragStartMouseY;
+    @Unique private int bbd$sidebarDragOffsetX;
+    @Unique private int bbd$sidebarDragOffsetY;
 
     @Inject(method = "init", at = @At("TAIL"))
     private void bbd$initSidebar(CallbackInfo callbackInfo)
     {
-        if (bbd$isBeyondScreen())
+        if (bbd$isSidebarExcludedScreen())
         {
-            ClientStorageState.clear();
             return;
         }
 
-        // The client menu must contain the same slots as the server menu before JEI and
-        // vanilla hit-testing inspect it. Creative screens keep the slots for index parity,
-        // but deliberately do not create or render the sidebar widgets.
+        bbd$initializeSidebarPosition();
         bbd$rebuildSidebarSlots();
-        if (bbd$isCreativeScreen())
-        {
-            ClientStorageState.clear();
-            return;
-        }
 
         int x = bbd$getSidebarX();
         int y = bbd$getSidebarY();
@@ -118,7 +118,8 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         bbd$depositPlayerButton = bbd$addRenderableWidget(Button.builder(Component.literal("存包"), button -> NetworkHandler.depositPlayerInventory())
                 .bounds(secondButtonX, secondButtonY, buttonWidth, 14).build());
         bbd$depositPlayerButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.deposit_player")));
-        bbd$sidebarToggleButton = bbd$addRenderableWidget(Button.builder(Component.literal("×"), button -> bbd$toggleSidebar())
+        bbd$sidebarToggleButton = bbd$addRenderableWidget(Button.builder(Component.literal("×"), button -> {
+                })
                 .bounds(SidebarRenderer.getToggleX(x), y + 4,
                         SidebarRenderer.TOGGLE_WIDTH, searchHeight).build());
         bbd$sidebarToggleButton.setTooltip(Tooltip.create(Component.translatable("better_beyond_dimensions.tooltip.hide_sidebar")));
@@ -133,7 +134,6 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         bbd$setWidgetsVisible(false);
         bbd$sidebarToggleButton.visible = false;
         bbd$sidebarToggleButton.active = false;
-        ClientStorageState.clear();
         NetworkHandler.requestSnapshot();
     }
 
@@ -181,6 +181,18 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         }
     }
 
+    /** Use the exact typed-stack tooltip path used by Beyond Dimensions' own screens. */
+    @Inject(method = "renderTooltip", at = @At("HEAD"), cancellable = true)
+    private void bbd$renderStorageTooltip(GuiGraphics graphics, int mouseX, int mouseY,
+                                          CallbackInfo callbackInfo)
+    {
+        if (!bbd$isSidebarExcludedScreen() && bbd$searchBox != null
+                && SidebarRenderer.renderStorageTooltip(this, graphics, mouseX, mouseY))
+        {
+            callbackInfo.cancel();
+        }
+    }
+
     @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
     private void bbd$sidebarClick(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> callbackInfo)
     {
@@ -192,13 +204,48 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         }
     }
 
+    @Inject(method = "mouseDragged", at = @At("HEAD"), cancellable = true)
+    private void bbd$sidebarDrag(double mouseX, double mouseY, int button, double dragX, double dragY,
+                                 CallbackInfoReturnable<Boolean> callbackInfo)
+    {
+        if (!bbd$isSidebarExcludedScreen() && bbd$searchBox != null
+                && SidebarRenderer.handleMouseDrag(this, mouseX, mouseY, button))
+        {
+            callbackInfo.setReturnValue(true);
+        }
+    }
+
+    /**
+     * Sidebar slots are real menu slots, but their vanilla x/y values cannot represent the
+     * sidebar's screen-relative position while the menu is being constructed before init().
+     * Map vanilla's hit-test back to the visible real slot instead of using those placeholder
+     * coordinates.
+     */
+    @Inject(method = "findSlot", at = @At("RETURN"), cancellable = true)
+    private void bbd$findSidebarSlot(double mouseX, double mouseY,
+                                     CallbackInfoReturnable<Slot> callbackInfo)
+    {
+        if (!bbd$isSidebarExcludedScreen() && bbd$searchBox != null)
+        {
+            NetworkStorageSlot slot = SidebarRenderer.findSlotAt(this, mouseX, mouseY);
+            if (slot != null)
+            {
+                callbackInfo.setReturnValue(slot);
+            }
+        }
+    }
+
     @Inject(method = "slotClicked", at = @At("HEAD"), cancellable = true)
     private void bbd$networkSlotClicked(Slot slot, int slotId, int button, ClickType clickType,
                                          CallbackInfo callbackInfo)
     {
         if (!bbd$isSidebarExcludedScreen() && slot instanceof NetworkStorageSlot)
         {
-            NetworkHandler.clickSidebarSlot(slotId, button, clickType);
+            // Never let middle-click/clone mutate a sidebar item; the wheel belongs to paging.
+            if (button != 2 && clickType != ClickType.CLONE)
+            {
+                NetworkHandler.clickSidebarSlot(slotId, button, clickType);
+            }
             callbackInfo.cancel();
         }
     }
@@ -206,7 +253,8 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Inject(method = "mouseReleased", at = @At("HEAD"), cancellable = true)
     private void bbd$sidebarRelease(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> callbackInfo)
     {
-        if (bbd$consumeSidebarMouseRelease())
+        if (!bbd$isSidebarExcludedScreen() && bbd$searchBox != null
+                && SidebarRenderer.handleMouseRelease(this, mouseX, mouseY, button))
         {
             callbackInfo.setReturnValue(true);
         }
@@ -231,6 +279,99 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     }
 
     @Unique
+    private void bbd$initializeSidebarPosition()
+    {
+        bbd$sidebarPositionKey = this.getClass().getName() + "|" + menu.getClass().getName()
+                + "|" + imageWidth + "x" + imageHeight;
+        SidebarPositionStore.Position saved = SidebarPositionStore.get(bbd$sidebarPositionKey).orElse(null);
+        int x = saved == null ? bbd$defaultSidebarX() : leftPos + saved.offsetX();
+        int y = saved == null ? topPos + 1 : topPos + saved.offsetY();
+        bbd$sidebarX = bbd$clampSidebarX(x);
+        bbd$sidebarY = bbd$clampSidebarY(y);
+    }
+
+    @Unique
+    private int bbd$defaultSidebarX()
+    {
+        int margin = 4;
+        int gap = 2;
+        int screenWidth = Minecraft.getInstance().getWindow().getGuiScaledWidth();
+        int leftCandidate = leftPos - SidebarRenderer.WIDTH - gap;
+        int rightCandidate = leftPos + imageWidth + gap;
+        boolean fitsLeft = leftCandidate >= margin;
+        boolean fitsRight = rightCandidate + SidebarRenderer.WIDTH <= screenWidth - margin;
+        if (fitsLeft)
+        {
+            return leftCandidate;
+        }
+        if (fitsRight)
+        {
+            return rightCandidate;
+        }
+
+        int leftSpace = leftPos - margin;
+        int rightSpace = screenWidth - margin - (leftPos + imageWidth);
+        return rightSpace > leftSpace ? rightCandidate : leftCandidate;
+    }
+
+    @Unique
+    private int bbd$clampSidebarX(int x)
+    {
+        int max = Math.max(4, Minecraft.getInstance().getWindow().getGuiScaledWidth()
+                - SidebarRenderer.WIDTH - 4);
+        return Math.max(4, Math.min(max, x));
+    }
+
+    @Unique
+    private int bbd$clampSidebarY(int y)
+    {
+        int max = Math.max(4, Minecraft.getInstance().getWindow().getGuiScaledHeight()
+                - SidebarRenderer.getPanelHeight() - 4);
+        return Math.max(4, Math.min(max, y));
+    }
+
+    @Unique
+    private void bbd$setSidebarPosition(int x, int y)
+    {
+        bbd$sidebarX = bbd$clampSidebarX(x);
+        bbd$sidebarY = bbd$clampSidebarY(y);
+        bbd$layoutSidebarWidgets();
+        bbd$positionSidebarSlots();
+    }
+
+    @Unique
+    private void bbd$layoutSidebarWidgets()
+    {
+        if (bbd$searchBox == null)
+        {
+            return;
+        }
+
+        int x = bbd$sidebarX;
+        int y = bbd$sidebarY;
+        int buttonGap = 3;
+        int buttonWidth = (SidebarRenderer.WIDTH - 7 - buttonGap) / 2;
+        int firstButtonX = x + 3;
+        int secondButtonX = firstButtonX + buttonWidth + buttonGap;
+        int firstButtonY = y + 20;
+        int secondButtonY = firstButtonY + 15;
+        bbd$searchBox.setX(x + SidebarRenderer.SEARCH_LEFT);
+        bbd$searchBox.setY(y + 4);
+        bbd$playerShiftButton.setX(firstButtonX);
+        bbd$playerShiftButton.setY(firstButtonY);
+        bbd$containerShiftButton.setX(secondButtonX);
+        bbd$containerShiftButton.setY(firstButtonY);
+        bbd$depositContainerButton.setX(firstButtonX);
+        bbd$depositContainerButton.setY(secondButtonY);
+        bbd$depositPlayerButton.setX(secondButtonX);
+        bbd$depositPlayerButton.setY(secondButtonY);
+        bbd$sidebarToggleButton.setX(SidebarRenderer.getToggleX(x));
+        bbd$sidebarToggleButton.setY(y + 4);
+        bbd$scrollWidget.setX(x + 7);
+        bbd$scrollWidget.setY(y + SidebarRenderer.getGridTop());
+    }
+
+    @Unique
     private void bbd$setWidgetsVisible(boolean visible)
     {
         if (bbd$searchBox == null)
@@ -251,11 +392,13 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         bbd$scrollWidget.active = visible;
     }
 
-    @Unique
-    private void bbd$toggleSidebar()
+    @Override
+    public void bbd$toggleSidebarVisibility()
     {
-        bbd$sidebarHidden = !bbd$sidebarHidden;
-        if (bbd$sidebarHidden && bbd$searchBox != null)
+        boolean hidden = !ClientStorageState.isSidebarHidden();
+        ClientStorageState.setSidebarHidden(hidden);
+        NetworkHandler.setSidebarHidden(hidden);
+        if (hidden && bbd$searchBox != null)
         {
             ((net.minecraft.client.gui.screens.Screen) (Object) this).setFocused(null);
             bbd$searchBox.setFocused(false);
@@ -321,19 +464,69 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Override
     public boolean bbd$isSidebarHidden()
     {
-        return bbd$sidebarHidden;
+        return ClientStorageState.isSidebarHidden();
+    }
+
+    @Override
+    public boolean bbd$isSidebarDragging()
+    {
+        return bbd$sidebarDragging;
+    }
+
+    @Override
+    public void bbd$beginSidebarDrag(double mouseX, double mouseY)
+    {
+        bbd$sidebarDragging = true;
+        bbd$sidebarDragStartMouseX = mouseX;
+        bbd$sidebarDragStartMouseY = mouseY;
+        bbd$sidebarDragOffsetX = (int) Math.floor(mouseX) - bbd$sidebarX;
+        bbd$sidebarDragOffsetY = (int) Math.floor(mouseY) - bbd$sidebarY;
+    }
+
+    @Override
+    public void bbd$dragSidebarTo(double mouseX, double mouseY)
+    {
+        if (!bbd$sidebarDragging)
+        {
+            return;
+        }
+        bbd$setSidebarPosition(
+                (int) Math.floor(mouseX) - bbd$sidebarDragOffsetX,
+                (int) Math.floor(mouseY) - bbd$sidebarDragOffsetY
+        );
+    }
+
+    @Override
+    public boolean bbd$endSidebarDrag(double mouseX, double mouseY)
+    {
+        if (!bbd$sidebarDragging)
+        {
+            return false;
+        }
+
+        bbd$dragSidebarTo(mouseX, mouseY);
+        bbd$sidebarDragging = false;
+        double deltaX = mouseX - bbd$sidebarDragStartMouseX;
+        double deltaY = mouseY - bbd$sidebarDragStartMouseY;
+        boolean moved = deltaX * deltaX + deltaY * deltaY >= 9.0D;
+        if (moved)
+        {
+            SidebarPositionStore.save(bbd$sidebarPositionKey,
+                    bbd$sidebarX - leftPos, bbd$sidebarY - topPos);
+        }
+        return moved;
     }
 
     @Override
     public int bbd$getSidebarX()
     {
-        return Math.max(4, leftPos - SidebarRenderer.WIDTH - 2);
+        return bbd$sidebarX;
     }
 
     @Override
     public int bbd$getSidebarY()
     {
-        return Math.max(4, topPos + 1);
+        return bbd$sidebarY;
     }
 
     @Override
@@ -351,7 +544,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
     @Override
     public void bbd$rebuildSidebarSlots()
     {
-        if (menu == null || bbd$isBeyondScreen())
+        if (menu == null || bbd$isSidebarExcludedScreen())
         {
             return;
         }
@@ -362,6 +555,20 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         access.bbd$ensureNetworkSlots(slotBaseX, slotBaseY);
         bbd$sidebarSlots.clear();
         bbd$sidebarSlots.addAll(access.bbd$getNetworkSlots());
+        bbd$positionSidebarSlots();
+    }
+
+    @Unique
+    private void bbd$positionSidebarSlots()
+    {
+        int slotBaseX = bbd$getSidebarX() + 8 - leftPos;
+        int slotBaseY = bbd$getSidebarY() + SidebarRenderer.getGridTop() + 1 - topPos;
+        for (int index = 0; index < bbd$sidebarSlots.size(); index++)
+        {
+            SlotPositionAccessor accessor = (SlotPositionAccessor) (Object) bbd$sidebarSlots.get(index);
+            accessor.bbd$setX(slotBaseX + index % SidebarRenderer.SLOT_COLUMNS * 18);
+            accessor.bbd$setY(slotBaseY + index / SidebarRenderer.SLOT_COLUMNS * 18);
+        }
     }
 
     @Override

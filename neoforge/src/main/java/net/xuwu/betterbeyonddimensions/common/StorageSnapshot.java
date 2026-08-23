@@ -8,6 +8,7 @@ public record StorageSnapshot(
         String networkName,
         boolean shiftPlayerInventory,
         boolean shiftContainer,
+        boolean sidebarHidden,
         List<StorageEntry> entries
 )
 {
@@ -17,8 +18,10 @@ public record StorageSnapshot(
         entries = entries == null ? List.of() : List.copyOf(entries);
     }
 
-    public static StorageSnapshot unavailable(boolean shiftPlayerInventory, boolean shiftContainer)
+    public static StorageSnapshot unavailable(boolean shiftPlayerInventory, boolean shiftContainer,
+                                              boolean sidebarHidden)
     {
-        return new StorageSnapshot(false, "", shiftPlayerInventory, shiftContainer, List.of());
+        return new StorageSnapshot(false, "", shiftPlayerInventory, shiftContainer,
+                sidebarHidden, List.of());
     }
 }

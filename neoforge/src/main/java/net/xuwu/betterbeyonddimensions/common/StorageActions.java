@@ -12,9 +12,11 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.CraftingContainer;
+import net.minecraft.world.inventory.ResultSlot;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -26,9 +28,12 @@ public final class StorageActions
     public static final int TOGGLE_CONTAINER_SHIFT = 1;
     public static final int DEPOSIT_CONTAINER = 2;
     public static final int DEPOSIT_PLAYER_INVENTORY = 3;
+    public static final int HIDE_SIDEBAR = 4;
+    public static final int SHOW_SIDEBAR = 5;
 
     private static final String SHIFT_PLAYER_TAG = "better_beyond_dimensions.shift_player_inventory";
     private static final String SHIFT_CONTAINER_TAG = "better_beyond_dimensions.shift_container";
+    private static final String SIDEBAR_HIDDEN_TAG = "better_beyond_dimensions.sidebar_hidden";
 
     private StorageActions()
     {
@@ -44,8 +49,33 @@ public final class StorageActions
         return player.getPersistentData().getBoolean(SHIFT_CONTAINER_TAG);
     }
 
+    public static boolean isSidebarHidden(Player player)
+    {
+        return player.getPersistentData().getBoolean(SIDEBAR_HIDDEN_TAG);
+    }
+
+    public static void setSidebarHidden(Player player, boolean hidden)
+    {
+        player.getPersistentData().putBoolean(SIDEBAR_HIDDEN_TAG, hidden);
+        if (hidden && player instanceof ServerPlayer serverPlayer)
+        {
+            clearSidebarSlots(serverPlayer);
+        }
+    }
+
     public static boolean toggle(Player player, int target)
     {
+        if (target == HIDE_SIDEBAR || target == SHOW_SIDEBAR)
+        {
+            boolean hidden = target == HIDE_SIDEBAR;
+            setSidebarHidden(player, hidden);
+            return hidden;
+        }
+        if (isSidebarHidden(player))
+        {
+            return false;
+        }
+
         CompoundTag data = player.getPersistentData();
         if (target == TOGGLE_PLAYER_SHIFT)
         {
@@ -64,6 +94,10 @@ public final class StorageActions
 
     public static void depositPlayerInventory(ServerPlayer player)
     {
+        if (isSidebarHidden(player))
+        {
+            return;
+        }
         DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
         if (network == null)
         {
@@ -86,6 +120,10 @@ public final class StorageActions
 
     public static void depositContainer(ServerPlayer player, AbstractContainerMenu menu)
     {
+        if (isSidebarHidden(player))
+        {
+            return;
+        }
         DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
         if (network == null || menu == null)
         {
@@ -93,12 +131,32 @@ public final class StorageActions
         }
 
         Container playerInventory = player.getInventory();
+        List<Slot> outputSlots = new ArrayList<>();
         for (Slot slot : menu.slots)
         {
             if (!(slot instanceof NetworkStorageSlot)
+                    && slot.container != playerInventory
+                    && slot.hasItem()
+                    && (slot instanceof ResultSlot || !slot.mayPlace(slot.getItem())))
+            {
+                outputSlots.add(slot);
+                if (slot instanceof ResultSlot resultSlot)
+                {
+                    quickCraftResultToNetwork(player, menu, resultSlot, network);
+                }
+                else
+                {
+                    quickTransferOutputToNetwork(player, menu, slot, network);
+                }
+            }
+        }
+        for (Slot slot : menu.slots)
+        {
+            if (!(slot instanceof NetworkStorageSlot)
+                    && !outputSlots.contains(slot)
                     && slot.container != playerInventory && slot.hasItem())
             {
-                depositStack(network, slot.getItem());
+                transferSlotToNetwork(player, menu, slot, network);
             }
         }
         menu.broadcastChanges();
@@ -110,7 +168,9 @@ public final class StorageActions
      */
     public static boolean routeQuickMove(ServerPlayer player, AbstractContainerMenu menu, int slotId)
     {
-        if (menu == null || slotId < 0 || slotId >= menu.slots.size())
+        if (isSidebarHidden(player)
+                || (player.isCreative() && menu == player.inventoryMenu)
+                || menu == null || slotId < 0 || slotId >= menu.slots.size())
         {
             return false;
         }
@@ -136,11 +196,144 @@ public final class StorageActions
             return false;
         }
 
+        if (slot instanceof ResultSlot resultSlot)
+        {
+            quickCraftResultToNetwork(player, menu, resultSlot, network);
+            return true;
+        }
+
         // Even if the network is full, consume this explicit setting rather than silently
         // falling back to a different vanilla transfer destination.
-        depositStack(network, slot.getItem());
+        if (!slot.mayPlace(slot.getItem()))
+        {
+            quickTransferOutputToNetwork(player, menu, slot, network);
+        }
+        else
+        {
+            transferSlotToNetwork(player, menu, slot, network);
+        }
         menu.broadcastChanges();
         return true;
+    }
+
+    /** Mirrors vanilla quick-move repetition for non-ResultSlot machine/mod output slots. */
+    private static void quickTransferOutputToNetwork(ServerPlayer player, AbstractContainerMenu menu,
+                                                     Slot slot, DimensionsNet network)
+    {
+        if (slot == null || !slot.hasItem())
+        {
+            return;
+        }
+
+        ItemStack initialOutput = slot.getItem().copy();
+        for (int iteration = 0; iteration < 4096 && slot.hasItem(); iteration++)
+        {
+            if (!sameStoredStack(initialOutput, slot.getItem())
+                    || transferSlotToNetwork(player, menu, slot, network) <= 0)
+            {
+                break;
+            }
+        }
+    }
+
+    /**
+     * Removes a stack through the Slot API so vanilla and modded output slots receive their
+     * normal onTake callbacks (furnace XP, recipe bookkeeping, machine side effects, etc.).
+     */
+    private static int transferSlotToNetwork(ServerPlayer player, AbstractContainerMenu menu,
+                                             Slot slot, DimensionsNet network)
+    {
+        if (slot == null || !slot.hasItem() || !slot.mayPickup(player))
+        {
+            return 0;
+        }
+
+        ItemStack source = slot.getItem().copy();
+        int requested = source.getCount();
+        ItemStackKey key = new ItemStackKey(source);
+        UnifiedStorage storage = network.getUnifiedStorage();
+        KeyAmount remaining = storage.insert(key, requested, false);
+        int inserted = (int) Math.min((long) requested,
+                Math.max(0L, requested - remaining.amount()));
+        if (inserted <= 0)
+        {
+            return 0;
+        }
+
+        // Output slots must be taken atomically. Partially taking a multi-item recipe result
+        // could consume the full recipe while only storing part of its output.
+        if (!slot.mayPlace(source) && inserted != requested)
+        {
+            storage.extract(key, inserted, false, false);
+            return 0;
+        }
+
+        ItemStack taken = slot.remove(inserted);
+        int takenCount = taken.isEmpty() ? 0 : Math.min(inserted, taken.getCount());
+        if (takenCount < inserted)
+        {
+            storage.extract(key, inserted - takenCount, false, false);
+        }
+        if (takenCount <= 0)
+        {
+            return 0;
+        }
+
+        if (taken.getCount() != takenCount)
+        {
+            taken.setCount(takenCount);
+        }
+        slot.onTake(player, taken);
+        slot.setChanged();
+        // TransientCraftingContainer#setChanged is empty in both target versions.
+        menu.slotsChanged(slot.container);
+        return takenCount;
+    }
+
+    /**
+     * Moves complete crafting results into the network and then lets ResultSlot perform
+     * the vanilla take bookkeeping. Calling onTake is essential: it consumes ingredients,
+     * handles recipe remainders, fires crafted hooks, and refreshes the next result.
+     */
+    private static void quickCraftResultToNetwork(ServerPlayer player, AbstractContainerMenu menu,
+                                                  ResultSlot resultSlot, DimensionsNet network)
+    {
+        UnifiedStorage storage = network.getUnifiedStorage();
+        for (int iteration = 0; iteration < 4096 && resultSlot.hasItem(); iteration++)
+        {
+            if (!resultSlot.mayPickup(player))
+            {
+                break;
+            }
+
+            ItemStack output = resultSlot.getItem().copy();
+            int outputCount = output.getCount();
+            if (outputCount <= 0)
+            {
+                break;
+            }
+
+            ItemStackKey key = new ItemStackKey(output);
+            KeyAmount remaining = storage.insert(key, outputCount, false);
+            long inserted = Math.max(0L, outputCount - remaining.amount());
+            if (inserted != outputCount)
+            {
+                if (inserted > 0L)
+                {
+                    storage.extract(key, inserted, false, false);
+                }
+                break;
+            }
+
+            ItemStack taken = resultSlot.remove(outputCount);
+            if (taken.isEmpty())
+            {
+                storage.extract(key, outputCount, false, false);
+                break;
+            }
+            resultSlot.onTake(player, taken);
+        }
+        menu.broadcastChanges();
     }
 
     /** Validates and applies a client-side sidebar view to the server's real menu slots. */
@@ -149,6 +342,12 @@ public final class StorageActions
         if (player == null || player.containerMenu == null
                 || !(player.containerMenu instanceof NetworkStorageMenuAccess access))
         {
+            return;
+        }
+
+        if (isSidebarHidden(player))
+        {
+            clearSidebarSlots(player);
             return;
         }
 
@@ -187,7 +386,7 @@ public final class StorageActions
             return;
         }
 
-        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        DimensionsNet network = isSidebarHidden(player) ? null : DimensionsNet.getNetFromPlayer(player);
         UnifiedStorage storage = network == null ? null : network.getUnifiedStorage();
         for (NetworkStorageSlot slot : access.bbd$getNetworkSlots())
         {
@@ -217,7 +416,7 @@ public final class StorageActions
     /** Handles both the custom native-style click packet and vanilla fallback menu clicks. */
     public static void handleSidebarClick(ServerPlayer player, int slotId, int button, ClickType clickType)
     {
-        if (player == null || player.containerMenu == null
+        if (player == null || isSidebarHidden(player) || player.containerMenu == null
                 || slotId < 0 || slotId >= player.containerMenu.slots.size()
                 || !(player.containerMenu.slots.get(slotId) instanceof NetworkStorageSlot slot))
         {
@@ -242,7 +441,7 @@ public final class StorageActions
     public static void handleSidebarClick(ServerPlayer player, NetworkStorageSlot slot, int button,
                                           ClickType clickType)
     {
-        if (player == null || player.containerMenu == null || slot == null)
+        if (player == null || isSidebarHidden(player) || player.containerMenu == null || slot == null)
         {
             return;
         }
@@ -263,7 +462,7 @@ public final class StorageActions
     /** Shift-clicking a sidebar cell transfers exactly one vanilla-sized group to the player. */
     public static void quickMoveSidebar(ServerPlayer player, NetworkStorageSlot slot)
     {
-        if (player == null || slot == null || slot.getKey() == null)
+        if (player == null || isSidebarHidden(player) || slot == null || slot.getKey() == null)
         {
             return;
         }
@@ -371,7 +570,7 @@ public final class StorageActions
 
     public static void withdraw(ServerPlayer player, ItemStack requestedStack, long amount)
     {
-        if (requestedStack == null || requestedStack.isEmpty() || amount <= 0L)
+        if (isSidebarHidden(player) || requestedStack == null || requestedStack.isEmpty() || amount <= 0L)
         {
             return;
         }
@@ -400,8 +599,56 @@ public final class StorageActions
         player.containerMenu.broadcastChanges();
     }
 
+    /** Extracts a JEI ingredient from a real sidebar slot on the logical server. */
+    public static ItemStack takeRecipeTransferIngredient(Player player, NetworkStorageSlot slot,
+                                                         int requestedAmount)
+    {
+        if (!(player instanceof ServerPlayer serverPlayer) || slot == null || requestedAmount <= 0
+                || isSidebarHidden(player) || slot.getKey() == null
+                || player.containerMenu == null || !player.containerMenu.slots.contains(slot))
+        {
+            return ItemStack.EMPTY;
+        }
+
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(serverPlayer);
+        if (network == null)
+        {
+            return ItemStack.EMPTY;
+        }
+
+        ItemStackKey key = slot.getKey();
+        long requested = Math.min((long) requestedAmount, slot.getStoredAmount());
+        KeyAmount extracted = network.getUnifiedStorage().extract(key, requested, false, false);
+        if (extracted.amount() <= 0L)
+        {
+            return ItemStack.EMPTY;
+        }
+        return key.copyStackWithCount(extracted.amount());
+    }
+
+    /** Restores an extraction when JEI rolls back an incomplete transfer set. */
+    public static long restoreRecipeTransferIngredient(Player player, NetworkStorageSlot slot,
+                                                       long amount)
+    {
+        if (!(player instanceof ServerPlayer serverPlayer) || slot == null || amount <= 0L
+                || slot.getKey() == null || player.containerMenu == null
+                || !player.containerMenu.slots.contains(slot))
+        {
+            return 0L;
+        }
+
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(serverPlayer);
+        if (network == null)
+        {
+            return 0L;
+        }
+
+        KeyAmount remaining = network.getUnifiedStorage().insert(slot.getKey(), amount, false);
+        return Math.max(0L, amount - remaining.amount());
+    }
+
     /**
-     * Fills real crafting slots for JEI's recipe-transfer button.  The client only sends the
+     * Fills real recipe input slots for JEI's recipe-transfer button.  The client only sends the
      * selected ingredient variants and target slot ids; all item movement is performed here on
      * the logical server, using the network before the player's inventory.
      */
@@ -413,7 +660,8 @@ public final class StorageActions
         }
 
         DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
-        UnifiedStorage storage = network == null ? null : network.getUnifiedStorage();
+        UnifiedStorage storage = isSidebarHidden(player) || network == null
+                ? null : network.getUnifiedStorage();
         List<Container> changedContainers = new java.util.ArrayList<>();
 
         for (RecipeFill fill : fills)
@@ -424,12 +672,16 @@ public final class StorageActions
             }
 
             Slot target = player.containerMenu.slots.get(fill.slotId());
-            if (!(target.container instanceof CraftingContainer))
+            boolean craftingTarget = target.container instanceof CraftingContainer;
+            ItemStack desired = fill.stack() == null ? ItemStack.EMPTY : fill.stack().copy();
+            if (target instanceof NetworkStorageSlot
+                    || target instanceof ResultSlot
+                    || target.container == player.getInventory()
+                    || (!craftingTarget && (desired.isEmpty() || fill.amount() <= 0)))
             {
                 continue;
             }
 
-            ItemStack desired = fill.stack() == null ? ItemStack.EMPTY : fill.stack().copy();
             ItemStack current = target.getItem().copy();
 
             if (desired.isEmpty() || fill.amount() <= 0)
@@ -509,16 +761,19 @@ public final class StorageActions
      */
     public static void clickSidebar(ServerPlayer player, NetworkStorageSlot slot, int button)
     {
-        if (slot == null || slot.getKey() == null)
+        if (isSidebarHidden(player) || slot == null)
         {
             return;
         }
-        clickSidebar(player, slot.getKey().copyStackWithCount(1), button);
+        ItemStack requested = slot.getKey() == null
+                ? ItemStack.EMPTY
+                : slot.getKey().copyStackWithCount(1);
+        clickSidebar(player, requested, button);
     }
 
     public static void clickSidebar(ServerPlayer player, ItemStack requestedStack, int button)
     {
-        if (button != 0 && button != 1)
+        if (isSidebarHidden(player) || (button != 0 && button != 1))
         {
             return;
         }
@@ -595,6 +850,20 @@ public final class StorageActions
             newCarried.setCount((int) newCount);
             player.containerMenu.setCarried(newCarried);
         }
+    }
+
+    private static void clearSidebarSlots(ServerPlayer player)
+    {
+        if (player == null || player.containerMenu == null
+                || !(player.containerMenu instanceof NetworkStorageMenuAccess access))
+        {
+            return;
+        }
+        for (NetworkStorageSlot slot : access.bbd$getNetworkSlots())
+        {
+            slot.clear();
+        }
+        player.containerMenu.broadcastChanges();
     }
 
     private static int depositStack(DimensionsNet network, ItemStack stack)

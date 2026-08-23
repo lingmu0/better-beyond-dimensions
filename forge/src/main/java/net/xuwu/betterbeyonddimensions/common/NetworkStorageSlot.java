@@ -14,10 +14,7 @@ import java.util.Optional;
 
 /**
  * A real menu slot whose contents are backed by the Beyond Dimensions network.
- *
- * <p>The slot is deliberately storage-shaped: vanilla synchronisation can see a normal
- * ItemStack, while the long amount and the actual mutation are handled by the addon storage
- * actions.  This is the same split used by Beyond Dimensions' typed storage slots.</p>
+ * The long amount and mutations are handled by the server storage actions.
  */
 public final class NetworkStorageSlot extends Slot
 {
@@ -66,15 +63,15 @@ public final class NetworkStorageSlot extends Slot
         update(-1, null, 0L, false);
     }
 
-    public int getVisualIndex()
-    {
-        return visualIndex;
-    }
-
     /** Binds the logical server owner so transfer handlers that call Slot.remove can extract. */
     public void bindPlayer(ServerPlayer player)
     {
         this.owningPlayer = player;
+    }
+
+    public int getVisualIndex()
+    {
+        return visualIndex;
     }
 
     public int getStorageIndex()
@@ -238,7 +235,7 @@ public final class NetworkStorageSlot extends Slot
     @Override
     public void setChanged()
     {
-        // Storage mutations broadcast the menu and the storage snapshot explicitly.
+        // Storage mutations explicitly broadcast the menu and snapshot.
     }
 
     @Override

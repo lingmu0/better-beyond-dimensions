@@ -30,6 +30,16 @@ public interface SidebarScreenAccess
 
     boolean bbd$isSidebarHidden();
 
+    boolean bbd$isSidebarDragging();
+
+    void bbd$beginSidebarDrag(double mouseX, double mouseY);
+
+    void bbd$dragSidebarTo(double mouseX, double mouseY);
+
+    boolean bbd$endSidebarDrag(double mouseX, double mouseY);
+
+    void bbd$toggleSidebarVisibility();
+
     int bbd$getSidebarX();
 
     int bbd$getSidebarY();

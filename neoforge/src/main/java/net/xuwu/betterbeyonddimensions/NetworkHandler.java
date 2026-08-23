@@ -33,7 +33,7 @@ public final class NetworkHandler
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event)
     {
-        PayloadRegistrar registrar = event.registrar("1");
+        PayloadRegistrar registrar = event.registrar("2");
         registrar.playBidirectional(RequestSnapshotPacket.TYPE, RequestSnapshotPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(RequestSnapshotPacket::handle, RequestSnapshotPacket::handle));
         registrar.playBidirectional(SnapshotPacket.TYPE, SnapshotPacket.STREAM_CODEC,
@@ -67,6 +67,13 @@ public final class NetworkHandler
     public static void toggleContainerShift()
     {
         PacketDistributor.sendToServer(new TogglePacket(StorageActions.TOGGLE_CONTAINER_SHIFT));
+    }
+
+    public static void setSidebarHidden(boolean hidden)
+    {
+        PacketDistributor.sendToServer(new TogglePacket(hidden
+                ? StorageActions.HIDE_SIDEBAR
+                : StorageActions.SHOW_SIDEBAR));
     }
 
     public static void depositContainer()
@@ -136,6 +143,7 @@ public final class NetworkHandler
         String networkName = buffer.readUtf(256);
         boolean shiftPlayer = buffer.readBoolean();
         boolean shiftContainer = buffer.readBoolean();
+        boolean sidebarHidden = buffer.readBoolean();
         int count = Math.min(512, Math.max(0, buffer.readVarInt()));
         List<StorageEntry> entries = new ArrayList<>(count);
         for (int index = 0; index < count; index++)
@@ -143,7 +151,8 @@ public final class NetworkHandler
             ItemStack stack = ItemStack.OPTIONAL_STREAM_CODEC.decode(buffer);
             entries.add(new StorageEntry(stack, buffer.readLong(), buffer.readLong(), buffer.readLong()));
         }
-        return new StorageSnapshot(available, networkName, shiftPlayer, shiftContainer, entries);
+        return new StorageSnapshot(available, networkName, shiftPlayer, shiftContainer,
+                sidebarHidden, entries);
     }
 
     private static void writeSnapshot(RegistryFriendlyByteBuf buffer, StorageSnapshot snapshot)
@@ -152,6 +161,7 @@ public final class NetworkHandler
         buffer.writeUtf(snapshot.networkName(), 256);
         buffer.writeBoolean(snapshot.shiftPlayerInventory());
         buffer.writeBoolean(snapshot.shiftContainer());
+        buffer.writeBoolean(snapshot.sidebarHidden());
         buffer.writeVarInt(snapshot.entries().size());
         for (StorageEntry entry : snapshot.entries())
         {

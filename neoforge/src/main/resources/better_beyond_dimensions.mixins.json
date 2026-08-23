@@ -5,11 +5,18 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "AbstractContainerMenuMixin",
-    "ServerPlayerMixin"
+    "ConfluenceRecipeTransferPacketMixin",
+    "JeiRecipeTransferServerMixin",
+    "ServerPlayerMixin",
+    "compat.SophisticatedStorageContainerMenuMixin"
   ],
   "client": [
     "ScreenWidgetAccessor",
-    "AbstractContainerScreenMixin"
+    "SlotPositionAccessor",
+    "AbstractContainerScreenMixin",
+    "CreativeInventorySlotFilterMixin",
+    "JeiBasicRecipeTransferHandlerMixin",
+    "ConfluenceRecipeTransferHandlerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

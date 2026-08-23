@@ -8,11 +8,11 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.ItemStack;
-import net.xuwu.betterbeyonddimensions.NetworkHandler;
+import net.xuwu.betterbeyonddimensions.common.NetworkStorageSlot;
 import net.xuwu.betterbeyonddimensions.common.StorageSnapshot;
 
 import java.util.List;
@@ -20,13 +20,16 @@ import java.util.List;
 /** Renders a compact Beyond Dimensions-style storage view beside vanilla container screens. */
 public final class SidebarRenderer
 {
-    private static final int SLOT_COLUMNS = 5;
+    public static final int SLOT_COLUMNS = 5;
     public static final int WIDTH = SLOT_COLUMNS * 18 + 14;
+    public static final int SEARCH_LEFT = 4;
+    public static final int TOGGLE_WIDTH = 12;
+    public static final int CONTROL_GAP = 3;
 
     private static final int GRID_TOP = CommonTextures.TOP_BASE_COMMON_HEIGHT
             + CommonTextures.COMMON_CONNECTION_HEIGHT
-            + 18;
-    private static final int MAX_VISIBLE_ROWS = 8;
+            + 22;
+    public static final int MAX_VISIBLE_ROWS = 8;
 
     private static final ClientStorageView STORAGE_VIEW = new ClientStorageView();
 
@@ -51,19 +54,59 @@ public final class SidebarRenderer
         return GRID_TOP;
     }
 
+    public static int getVisibleRows()
+    {
+        return visibleRows();
+    }
+
+    public static int getSearchWidth()
+    {
+        return WIDTH - SEARCH_LEFT - TOGGLE_WIDTH - CONTROL_GAP * 2;
+    }
+
+    public static int getToggleX(int sidebarX)
+    {
+        return sidebarX + WIDTH - TOGGLE_WIDTH - CONTROL_GAP;
+    }
+
+    public static void prepareSlots(SidebarScreenAccess host)
+    {
+        if (!ClientStorageState.available() || host.bbd$isSidebarHidden())
+        {
+            host.bbd$updateSidebarSlots(List.of());
+            return;
+        }
+
+        List<ClientStorageView.Entry> entries = entries(host);
+        StorageSnapshot snapshot = ClientStorageState.snapshot();
+        syncScrollState(snapshot, host.bbd$getSearchBox().getValue(), entries.size());
+        host.bbd$updateSidebarSlots(entries);
+    }
+
     public static void render(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY, float partialTick)
     {
         StorageSnapshot snapshot = ClientStorageState.snapshot();
         if (!snapshot.available())
         {
+            host.bbd$updateSidebarSlots(List.of());
             setWidgetsVisible(host, false);
+            host.bbd$getSidebarToggleButton().visible = false;
+            host.bbd$getSidebarToggleButton().active = false;
             return;
         }
 
         syncWidgets(host);
+        if (host.bbd$isSidebarHidden())
+        {
+            host.bbd$updateSidebarSlots(List.of());
+            renderWidgets(host, graphics, mouseX, mouseY, partialTick);
+            return;
+        }
+
         List<ClientStorageView.Entry> entries = entries(host);
         int rows = visibleRows();
         syncScrollState(snapshot, host.bbd$getSearchBox().getValue(), entries.size());
+        host.bbd$updateSidebarSlots(entries);
 
         int x = host.bbd$getSidebarX();
         int y = host.bbd$getSidebarY();
@@ -85,47 +128,18 @@ public final class SidebarRenderer
                 {
                     graphics.fill(slotX, slotY, slotX + 16, slotY + 16, 0x80FFFFFF);
                 }
-                if (entryIndex < 0 || entryIndex >= entries.size())
+                NetworkStorageSlot slot = host.bbd$getSidebarSlots().get(row * SLOT_COLUMNS + col);
+                if (entryIndex < 0 || entryIndex >= entries.size() || !slot.hasItem())
                 {
                     continue;
                 }
 
-                ClientStorageView.Entry entry = entries.get(entryIndex);
-                entry.key().getRender().render(graphics, entry.key(), slotX, slotY);
-                entry.key().getRender().renderAmount(graphics, entry.amount(), slotX, slotY);
+                slot.getKey().getRender().render(graphics, slot.getKey(), slotX, slotY);
+                slot.getKey().getRender().renderAmount(graphics, slot.getStoredAmount(), slotX, slotY);
             }
         }
 
         renderWidgets(host, graphics, mouseX, mouseY, partialTick);
-    }
-
-    public static boolean handleClick(SidebarScreenAccess host, double mouseX, double mouseY, int button)
-    {
-        if (!ClientStorageState.available() || (button != 0 && button != 1))
-        {
-            return false;
-        }
-
-        List<ClientStorageView.Entry> entries = entries(host);
-        int index = cellIndexAt(host, mouseX, mouseY);
-        if (index < 0)
-        {
-            return false;
-        }
-
-        ItemStack stack = index < entries.size()
-                ? entries.get(index).key().getRenderStack()
-                : ItemStack.EMPTY;
-        if (Screen.hasShiftDown() && !stack.isEmpty() && index < entries.size())
-        {
-            long amount = Math.min((long) Integer.MAX_VALUE, Math.max(1L, entries.get(index).amount()));
-            NetworkHandler.withdraw(stack, (int) amount);
-        }
-        else
-        {
-            NetworkHandler.clickSidebar(stack, button, host.bbd$getCarried());
-        }
-        return true;
     }
 
     public static boolean handleMouseClick(SidebarScreenAccess host, double mouseX, double mouseY, int button)
@@ -136,14 +150,33 @@ public final class SidebarRenderer
             return false;
         }
 
+        Button toggle = host.bbd$getSidebarToggleButton();
+        if (button == 0 && toggle.visible && toggle.active && toggle.isMouseOver(mouseX, mouseY))
+        {
+            if (search.isFocused())
+            {
+                ((Screen) (Object) host).setFocused(null);
+                search.setFocused(false);
+            }
+            host.bbd$beginSidebarDrag(mouseX, mouseY);
+            return true;
+        }
+
         if (search.visible && search.active && search.isMouseOver(mouseX, mouseY))
         {
-            if (button == 1)
+            if (button == 0 || button == 1)
             {
                 Screen screen = (Screen) (Object) host;
                 screen.setFocused(search);
                 search.setFocused(true);
-                search.setValue("");
+                if (button == 0)
+                {
+                    search.mouseClicked(mouseX, mouseY, button);
+                }
+                else
+                {
+                    search.setValue("");
+                }
                 return true;
             }
             return false;
@@ -154,12 +187,40 @@ public final class SidebarRenderer
             ((Screen) (Object) host).setFocused(null);
             search.setFocused(false);
         }
-        return handleClick(host, mouseX, mouseY, button);
+        // Let AbstractContainerScreen.slotClicked process real NetworkStorageSlots.
+        return false;
+    }
+
+    public static boolean handleMouseDrag(SidebarScreenAccess host, double mouseX, double mouseY, int button)
+    {
+        if (button != 0 || !host.bbd$isSidebarDragging())
+        {
+            return false;
+        }
+
+        host.bbd$dragSidebarTo(mouseX, mouseY);
+        return true;
+    }
+
+    public static boolean handleMouseRelease(SidebarScreenAccess host, double mouseX, double mouseY, int button)
+    {
+        if (button == 0 && host.bbd$isSidebarDragging())
+        {
+            boolean dragged = host.bbd$endSidebarDrag(mouseX, mouseY);
+            host.bbd$consumeSidebarMouseRelease();
+            if (!dragged)
+            {
+                host.bbd$toggleSidebarVisibility();
+            }
+            return true;
+        }
+
+        return host.bbd$consumeSidebarMouseRelease();
     }
 
     public static boolean handleScroll(SidebarScreenAccess host, double mouseX, double mouseY, double scrollAmount)
     {
-        if (!ClientStorageState.available() || scrollAmount == 0.0D)
+        if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || scrollAmount == 0.0D)
         {
             return false;
         }
@@ -184,25 +245,35 @@ public final class SidebarRenderer
     public static void renderTooltip(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY)
     {
         renderButtonTooltip(host, mouseX, mouseY);
-        if (!ClientStorageState.available() || !host.bbd$getCarried().isEmpty())
+    }
+
+    /**
+     * Replaces vanilla's ItemStack tooltip with Beyond Dimensions' native typed-stack tooltip.
+     * Calling this from the container's normal tooltip phase avoids duplicate tooltip passes.
+     */
+    public static boolean renderStorageTooltip(SidebarScreenAccess host, GuiGraphics graphics,
+                                               int mouseX, int mouseY)
+    {
+        if (!ClientStorageState.available() || host.bbd$isSidebarHidden()
+                || !host.bbd$getCarried().isEmpty())
         {
-            return;
+            return false;
         }
 
-        List<ClientStorageView.Entry> entries = entries(host);
-        int index = cellIndexAt(host, mouseX, mouseY);
-        if (index >= 0 && index < entries.size())
+        NetworkStorageSlot slot = findSlotAt(host, mouseX, mouseY);
+        if (slot != null && slot.hasItem() && slot.getKey() != null)
         {
-            ClientStorageView.Entry entry = entries.get(index);
-            entry.key().getRender().renderTooltip(
+            slot.getKey().getRender().renderTooltip(
                     graphics,
                     Minecraft.getInstance().font,
-                    entry.key(),
-                    entry.amount(),
+                    slot.getKey(),
+                    slot.getStoredAmount(),
                     mouseX,
                     mouseY
             );
+            return true;
         }
+        return false;
     }
 
     private static void renderButtonTooltip(SidebarScreenAccess host, int mouseX, int mouseY)
@@ -211,7 +282,8 @@ public final class SidebarRenderer
                 host.bbd$getPlayerShiftButton(),
                 host.bbd$getContainerShiftButton(),
                 host.bbd$getDepositContainerButton(),
-                host.bbd$getDepositPlayerButton()
+                host.bbd$getDepositPlayerButton(),
+                host.bbd$getSidebarToggleButton()
         };
         for (Button button : buttons)
         {
@@ -291,7 +363,15 @@ public final class SidebarRenderer
 
     private static void syncWidgets(SidebarScreenAccess host)
     {
-        setWidgetsVisible(host, true);
+        boolean visible = !host.bbd$isSidebarHidden();
+        setWidgetsVisible(host, visible);
+        Button toggle = host.bbd$getSidebarToggleButton();
+        toggle.visible = true;
+        toggle.active = true;
+        toggle.setMessage(Component.literal(host.bbd$isSidebarHidden() ? "+" : "×"));
+        toggle.setTooltip(Tooltip.create(Component.translatable(host.bbd$isSidebarHidden()
+                ? "better_beyond_dimensions.tooltip.show_sidebar"
+                : "better_beyond_dimensions.tooltip.hide_sidebar")));
         StorageSnapshot snapshot = ClientStorageState.snapshot();
         boolean player = snapshot.shiftPlayerInventory();
         boolean container = snapshot.shiftContainer();
@@ -324,6 +404,11 @@ public final class SidebarRenderer
 
     private static void renderWidgets(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY, float partialTick)
     {
+        host.bbd$getSidebarToggleButton().render(graphics, mouseX, mouseY, partialTick);
+        if (host.bbd$isSidebarHidden())
+        {
+            return;
+        }
         host.bbd$getSearchBox().render(graphics, mouseX, mouseY, partialTick);
         host.bbd$getPlayerShiftButton().render(graphics, mouseX, mouseY, partialTick);
         host.bbd$getContainerShiftButton().render(graphics, mouseX, mouseY, partialTick);
@@ -355,6 +440,30 @@ public final class SidebarRenderer
         }
 
         return (ClientStorageState.scrollRow() + row) * SLOT_COLUMNS + col;
+    }
+
+    public static NetworkStorageSlot findSlotAt(SidebarScreenAccess host, double mouseX, double mouseY)
+    {
+        if (!ClientStorageState.available() || host.bbd$isSidebarHidden())
+        {
+            return null;
+        }
+
+        int storageIndex = cellIndexAt(host, mouseX, mouseY);
+        if (storageIndex < 0)
+        {
+            return null;
+        }
+
+        int visualIndex = storageIndex - ClientStorageState.scrollRow() * SLOT_COLUMNS;
+        List<NetworkStorageSlot> slots = host.bbd$getSidebarSlots();
+        if (visualIndex < 0 || visualIndex >= slots.size())
+        {
+            return null;
+        }
+        // Empty visible cells must still be real hit targets. Returning null makes vanilla
+        // treat the click as outside the menu and drop the carried stack into the world.
+        return slots.get(visualIndex);
     }
 
     private static boolean isHovered(int x, int y, double mouseX, double mouseY, int row, int col)

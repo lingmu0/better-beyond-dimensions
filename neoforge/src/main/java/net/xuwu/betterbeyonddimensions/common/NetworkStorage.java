@@ -22,10 +22,11 @@ public final class NetworkStorage
     {
         boolean shiftPlayer = StorageActions.isShiftPlayerInventoryEnabled(player);
         boolean shiftContainer = StorageActions.isShiftContainerEnabled(player);
+        boolean sidebarHidden = StorageActions.isSidebarHidden(player);
         DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
         if (network == null)
         {
-            return StorageSnapshot.unavailable(shiftPlayer, shiftContainer);
+            return StorageSnapshot.unavailable(shiftPlayer, shiftContainer, sidebarHidden);
         }
 
         UnifiedStorage storage = network.getUnifiedStorage();
@@ -51,6 +52,7 @@ public final class NetworkStorage
                 network.getNetworkName().getString(),
                 shiftPlayer,
                 shiftContainer,
+                sidebarHidden,
                 entries
         );
     }

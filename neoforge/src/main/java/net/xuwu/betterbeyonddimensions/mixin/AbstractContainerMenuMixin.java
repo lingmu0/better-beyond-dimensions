@@ -4,12 +4,14 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
-import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.NonNullList;
 import net.xuwu.betterbeyonddimensions.NetworkHandler;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorageMenuAccess;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorageSlot;
 import net.xuwu.betterbeyonddimensions.common.StorageActions;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -27,6 +29,14 @@ public abstract class AbstractContainerMenuMixin implements NetworkStorageMenuAc
     @Shadow
     protected abstract Slot addSlot(Slot slot);
 
+    @Shadow
+    @Final
+    private NonNullList<ItemStack> lastSlots;
+
+    @Shadow
+    @Final
+    private NonNullList<ItemStack> remoteSlots;
+
     @Unique
     private final List<NetworkStorageSlot> bbd$networkSlots = new ArrayList<>();
 
@@ -37,9 +47,36 @@ public abstract class AbstractContainerMenuMixin implements NetworkStorageMenuAc
     }
 
     @Override
+    public void bbd$addNetworkSlot(NetworkStorageSlot slot)
+    {
+        addSlot(slot);
+    }
+
+    @Override
+    public void bbd$removeNetworkSlot(NetworkStorageSlot slot)
+    {
+        AbstractContainerMenu menu = (AbstractContainerMenu) (Object) this;
+        int index = menu.slots.indexOf(slot);
+        if (index < 0)
+        {
+            return;
+        }
+
+        menu.slots.remove(index);
+        if (index < lastSlots.size())
+        {
+            lastSlots.remove(index);
+        }
+        if (index < remoteSlots.size())
+        {
+            remoteSlots.remove(index);
+        }
+    }
+
+    @Override
     public void bbd$ensureNetworkSlots(int x, int y)
     {
-        if (!bbd$networkSlots.isEmpty())
+        if (bbd$isNetworkSlotExcludedMenu() || !bbd$networkSlots.isEmpty())
         {
             return;
         }
@@ -54,6 +91,31 @@ public abstract class AbstractContainerMenuMixin implements NetworkStorageMenuAc
                     y + row * 18);
             addSlot(slot);
             bbd$networkSlots.add(slot);
+        }
+    }
+
+    /**
+     * The server can send the first slot update immediately after opening a menu, before the
+     * client screen's init() callback has run. Ensure the client-side real slots exist before
+     * vanilla setItem() calls getSlot(slotId).
+     */
+    @Inject(method = "setItem", at = @At("HEAD"))
+    private void bbd$ensureNetworkSlotsBeforeSync(int stateId, int slotId, ItemStack stack,
+                                                    CallbackInfo callbackInfo)
+    {
+        if (!bbd$isNetworkSlotExcludedMenu())
+        {
+            bbd$ensureNetworkSlots(0, 0);
+        }
+    }
+
+    @Inject(method = "initializeContents", at = @At("HEAD"))
+    private void bbd$ensureNetworkSlotsBeforeContents(int stateId, List<ItemStack> items,
+                                                        ItemStack carried, CallbackInfo callbackInfo)
+    {
+        if (!bbd$isNetworkSlotExcludedMenu())
+        {
+            bbd$ensureNetworkSlots(0, 0);
         }
     }
 
@@ -80,5 +142,14 @@ public abstract class AbstractContainerMenuMixin implements NetworkStorageMenuAc
                 callbackInfo.cancel();
             }
         }
+    }
+
+    @Unique
+    private boolean bbd$isNetworkSlotExcludedMenu()
+    {
+        String className = ((Object) this).getClass().getName();
+        return className.startsWith("com.wintercogs.beyonddimensions.")
+                || className.equals("net.minecraft.client.gui.screens.inventory."
+                + "CreativeModeInventoryScreen$ItemPickerMenu");
     }
 }

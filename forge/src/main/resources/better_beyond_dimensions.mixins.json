@@ -4,12 +4,17 @@
   "package": "net.xuwu.betterbeyonddimensions.mixin",
   "compatibilityLevel": "JAVA_17",
   "mixins": [
-    "AbstractContainerMenuMixin"
+    "AbstractContainerMenuMixin",
+    "JeiRecipeTransferServerMixin",
+    "ServerPlayerMixin",
+    "compat.SophisticatedStorageContainerMenuMixin"
   ],
   "client": [
     "ScreenWidgetAccessor",
+    "SlotPositionAccessor",
     "AbstractContainerScreenMixin",
-    "CreativeModeInventoryScreenMixin"
+    "CreativeInventorySlotFilterMixin",
+    "JeiBasicRecipeTransferHandlerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

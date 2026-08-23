@@ -8,7 +8,7 @@ import java.util.List;
 /** Client copy of the last server-authoritative snapshot. */
 public final class ClientStorageState
 {
-    private static volatile StorageSnapshot snapshot = StorageSnapshot.unavailable(false, false);
+    private static volatile StorageSnapshot snapshot = StorageSnapshot.unavailable(false, false, false);
     private static int scrollRow;
 
     private ClientStorageState()
@@ -17,13 +17,13 @@ public final class ClientStorageState
 
     public static void apply(StorageSnapshot next)
     {
-        snapshot = next == null ? StorageSnapshot.unavailable(false, false) : next;
+        snapshot = next == null ? StorageSnapshot.unavailable(false, false, false) : next;
         scrollRow = 0;
     }
 
     public static void clear()
     {
-        snapshot = StorageSnapshot.unavailable(false, false);
+        snapshot = StorageSnapshot.unavailable(false, false, false);
         scrollRow = 0;
     }
 
@@ -35,6 +35,25 @@ public final class ClientStorageState
     public static boolean available()
     {
         return snapshot.available();
+    }
+
+    public static boolean isSidebarHidden()
+    {
+        return snapshot.sidebarHidden();
+    }
+
+    /** Applies the button immediately while the server-authoritative snapshot is in flight. */
+    public static void setSidebarHidden(boolean hidden)
+    {
+        StorageSnapshot current = snapshot;
+        snapshot = new StorageSnapshot(
+                current.available(),
+                current.networkName(),
+                current.shiftPlayerInventory(),
+                current.shiftContainer(),
+                hidden,
+                current.entries()
+        );
     }
 
     public static List<StorageEntry> entries()
@@ -56,4 +75,5 @@ public final class ClientStorageState
     {
         scrollRow = 0;
     }
+
 }
