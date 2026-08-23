@@ -12,8 +12,6 @@ import java.util.List;
 /** Read-only adapter from the Beyond Dimensions API to this add-on's packets. */
 public final class NetworkStorage
 {
-    private static final int MAX_CLIENT_ENTRIES = 512;
-
     private NetworkStorage()
     {
     }
@@ -29,8 +27,46 @@ public final class NetworkStorage
             return StorageSnapshot.unavailable(shiftPlayer, shiftContainer, sidebarHidden);
         }
 
-        UnifiedStorage storage = network.getUnifiedStorage();
+        return new StorageSnapshot(
+                true,
+                network.getNetworkName().getString(),
+                shiftPlayer,
+                shiftContainer,
+                sidebarHidden,
+                entries(network.getUnifiedStorage())
+        );
+    }
+
+    /** Returns only the small metadata portion used by incremental sync packets. */
+    public static StorageSnapshot metadata(Player player)
+    {
+        boolean shiftPlayer = StorageActions.isShiftPlayerInventoryEnabled(player);
+        boolean shiftContainer = StorageActions.isShiftContainerEnabled(player);
+        boolean sidebarHidden = StorageActions.isSidebarHidden(player);
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        if (network == null)
+        {
+            return StorageSnapshot.unavailable(shiftPlayer, shiftContainer, sidebarHidden);
+        }
+
+        return new StorageSnapshot(
+                true,
+                network.getNetworkName().getString(),
+                shiftPlayer,
+                shiftContainer,
+                sidebarHidden,
+                List.of()
+        );
+    }
+
+    public static List<StorageEntry> entries(UnifiedStorage storage)
+    {
         List<StorageEntry> entries = new ArrayList<>();
+        if (storage == null)
+        {
+            return entries;
+        }
+
         for (KeyAmount stored : storage.getStorage())
         {
             if (stored.amount() <= 0L || !(stored.key() instanceof ItemStackKey itemKey) || itemKey.isEmpty())
@@ -41,19 +77,6 @@ public final class NetworkStorage
             long modifiedTime = storage.getLastModifiedTimeMap().getOrDefault(stored.key(), 0L);
             entries.add(new StorageEntry(itemKey.copyStack(), stored.amount(), insertedTime, modifiedTime));
         }
-
-        if (entries.size() > MAX_CLIENT_ENTRIES)
-        {
-            entries = new ArrayList<>(entries.subList(0, MAX_CLIENT_ENTRIES));
-        }
-
-        return new StorageSnapshot(
-                true,
-                network.getNetworkName().getString(),
-                shiftPlayer,
-                shiftContainer,
-                sidebarHidden,
-                entries
-        );
+        return entries;
     }
 }

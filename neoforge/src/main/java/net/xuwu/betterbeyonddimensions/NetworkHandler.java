@@ -1,6 +1,7 @@
 package net.xuwu.betterbeyonddimensions;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -20,24 +21,35 @@ import net.xuwu.betterbeyonddimensions.common.RecipeFill;
 import net.xuwu.betterbeyonddimensions.common.StorageActions;
 import net.xuwu.betterbeyonddimensions.common.StorageEntry;
 import net.xuwu.betterbeyonddimensions.common.StorageSnapshot;
+import net.xuwu.betterbeyonddimensions.common.StorageSyncState;
+import com.wintercogs.beyonddimensions.api.dimensionnet.DimensionsNet;
+import com.wintercogs.beyonddimensions.api.dimensionnet.UnifiedStorage;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 /** NeoForge 1.21.1 custom payloads for the sidebar. */
 public final class NetworkHandler
 {
+    private static final int MAX_SYNC_PACKET_BYTES = 921600;
+    private static final Map<ServerPlayer, StorageSyncState> SYNC_STATES = new WeakHashMap<>();
+    private static long nextSyncSequence;
+
     private NetworkHandler()
     {
     }
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event)
     {
-        PayloadRegistrar registrar = event.registrar("2");
+        PayloadRegistrar registrar = event.registrar("3");
         registrar.playBidirectional(RequestSnapshotPacket.TYPE, RequestSnapshotPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(RequestSnapshotPacket::handle, RequestSnapshotPacket::handle));
         registrar.playBidirectional(SnapshotPacket.TYPE, SnapshotPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(SnapshotPacket::handle, SnapshotPacket::handle));
+        registrar.playBidirectional(StorageDeltaPacket.TYPE, StorageDeltaPacket.STREAM_CODEC,
+                new DirectionalPayloadHandler<>(StorageDeltaPacket::handle, StorageDeltaPacket::handle));
         registrar.playBidirectional(TogglePacket.TYPE, TogglePacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(TogglePacket::handle, TogglePacket::handle));
         registrar.playBidirectional(DepositPacket.TYPE, DepositPacket.STREAM_CODEC,
@@ -133,8 +145,196 @@ public final class NetworkHandler
 
     public static void sendSnapshot(ServerPlayer player)
     {
+        if (player == null)
+        {
+            return;
+        }
         StorageActions.refreshSidebarSlots(player);
-        PacketDistributor.sendToPlayer(player, new SnapshotPacket(NetworkStorage.snapshot(player)));
+
+        UnifiedStorage storage = currentStorage(player);
+        if (storage == null)
+        {
+            closeState(player);
+            sendSnapshotChunks(player, NetworkStorage.metadata(player), List.of());
+            return;
+        }
+
+        StorageSyncState state = stateFor(player, storage);
+        if (!state.initialized())
+        {
+            StorageSnapshot full = NetworkStorage.snapshot(player);
+            sendSnapshotChunks(player, full, full.entries());
+            state.initialize(full.entries());
+            state.setMetadata(metadataOnly(full));
+            return;
+        }
+
+        flushChanges(player, state);
+    }
+
+    /** Flushes listener-collected changes once per server tick, like the native menu sync. */
+    public static void tick(ServerPlayer player)
+    {
+        if (player == null)
+        {
+            return;
+        }
+
+        StorageSyncState state = SYNC_STATES.get(player);
+        if (state == null)
+        {
+            return;
+        }
+
+        if (currentStorage(player) != state.storage())
+        {
+            sendSnapshot(player);
+            return;
+        }
+
+        if (state.initialized() && state.hasChanges())
+        {
+            StorageActions.refreshSidebarSlots(player);
+            flushChanges(player, state);
+        }
+    }
+
+    private static void flushChanges(ServerPlayer player, StorageSyncState state)
+    {
+        StorageSnapshot metadata = NetworkStorage.metadata(player);
+        boolean metadataChanged = !sameMetadata(metadata, state.metadata());
+        List<StorageEntry> changes = state.hasChanges()
+                ? state.collectChanges() : List.of();
+        if (!metadataChanged && changes.isEmpty())
+        {
+            return;
+        }
+
+        sendDeltaChunks(player, metadata, changes);
+        state.markSynced(changes);
+        state.setMetadata(metadata);
+    }
+
+    private static UnifiedStorage currentStorage(ServerPlayer player)
+    {
+        DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
+        return network == null ? null : network.getUnifiedStorage();
+    }
+
+    private static StorageSyncState stateFor(ServerPlayer player, UnifiedStorage storage)
+    {
+        StorageSyncState state = SYNC_STATES.get(player);
+        if (state == null || state.storage() != storage)
+        {
+            if (state != null)
+            {
+                state.close();
+            }
+            state = new StorageSyncState(storage);
+            SYNC_STATES.put(player, state);
+        }
+        return state;
+    }
+
+    private static void closeState(ServerPlayer player)
+    {
+        StorageSyncState state = SYNC_STATES.remove(player);
+        if (state != null)
+        {
+            state.close();
+        }
+    }
+
+    private static StorageSnapshot metadataOnly(StorageSnapshot snapshot)
+    {
+        return new StorageSnapshot(snapshot.available(), snapshot.networkName(),
+                snapshot.shiftPlayerInventory(), snapshot.shiftContainer(), snapshot.sidebarHidden(), List.of());
+    }
+
+    private static boolean sameMetadata(StorageSnapshot first, StorageSnapshot second)
+    {
+        return first != null && second != null
+                && first.available() == second.available()
+                && first.shiftPlayerInventory() == second.shiftPlayerInventory()
+                && first.shiftContainer() == second.shiftContainer()
+                && first.sidebarHidden() == second.sidebarHidden()
+                && first.networkName().equals(second.networkName());
+    }
+
+    private static void sendSnapshotChunks(ServerPlayer player, StorageSnapshot metadata,
+                                           List<StorageEntry> entries)
+    {
+        List<List<StorageEntry>> chunks = splitEntries(player, entries);
+        long sequence = ++nextSyncSequence;
+        for (int index = 0; index < chunks.size(); index++)
+        {
+            StorageSnapshot chunk = new StorageSnapshot(metadata.available(), metadata.networkName(),
+                    metadata.shiftPlayerInventory(), metadata.shiftContainer(), metadata.sidebarHidden(),
+                    chunks.get(index));
+            PacketDistributor.sendToPlayer(player,
+                    new SnapshotPacket(sequence, index, chunks.size(), chunk));
+        }
+    }
+
+    private static void sendDeltaChunks(ServerPlayer player, StorageSnapshot metadata,
+                                         List<StorageEntry> changes)
+    {
+        List<List<StorageEntry>> chunks = splitEntries(player, changes);
+        long sequence = ++nextSyncSequence;
+        for (int index = 0; index < chunks.size(); index++)
+        {
+            PacketDistributor.sendToPlayer(player,
+                    new StorageDeltaPacket(sequence, index, chunks.size(), metadata, chunks.get(index)));
+        }
+    }
+
+    private static List<List<StorageEntry>> splitEntries(ServerPlayer player, List<StorageEntry> entries)
+    {
+        List<List<StorageEntry>> chunks = new ArrayList<>();
+        List<StorageEntry> current = new ArrayList<>();
+        int currentBytes = 0;
+        if (entries != null)
+        {
+            for (StorageEntry entry : entries)
+            {
+                if (entry == null || entry.stack().isEmpty())
+                {
+                    continue;
+                }
+                int entryBytes = estimateEntryBytes(player, entry);
+                if (!current.isEmpty() && currentBytes + entryBytes > MAX_SYNC_PACKET_BYTES - 1024)
+                {
+                    chunks.add(List.copyOf(current));
+                    current = new ArrayList<>();
+                    currentBytes = 0;
+                }
+                current.add(entry);
+                currentBytes += entryBytes;
+            }
+        }
+        if (!current.isEmpty() || chunks.isEmpty())
+        {
+            chunks.add(List.copyOf(current));
+        }
+        return chunks;
+    }
+
+    private static int estimateEntryBytes(ServerPlayer player, StorageEntry entry)
+    {
+        RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(
+                Unpooled.buffer(), player.level().registryAccess());
+        try
+        {
+            ItemStack.OPTIONAL_STREAM_CODEC.encode(buffer, entry.stack());
+            buffer.writeLong(entry.amount());
+            buffer.writeLong(entry.insertedTime());
+            buffer.writeLong(entry.modifiedTime());
+            return Math.max(1, buffer.readableBytes());
+        }
+        finally
+        {
+            buffer.release();
+        }
     }
 
     private static StorageSnapshot readSnapshot(RegistryFriendlyByteBuf buffer)
@@ -144,7 +344,7 @@ public final class NetworkHandler
         boolean shiftPlayer = buffer.readBoolean();
         boolean shiftContainer = buffer.readBoolean();
         boolean sidebarHidden = buffer.readBoolean();
-        int count = Math.min(512, Math.max(0, buffer.readVarInt()));
+        int count = Math.max(0, buffer.readVarInt());
         List<StorageEntry> entries = new ArrayList<>(count);
         for (int index = 0; index < count; index++)
         {
@@ -197,7 +397,8 @@ public final class NetworkHandler
         }
     }
 
-    private record SnapshotPacket(StorageSnapshot snapshot) implements CustomPacketPayload
+    private record SnapshotPacket(long sequence, int chunkIndex, int chunkCount,
+                                  StorageSnapshot snapshot) implements CustomPacketPayload
     {
         private static final Type<SnapshotPacket> TYPE = new Type<>(BetterBeyondDimensions.id("snapshot"));
         private static final StreamCodec<RegistryFriendlyByteBuf, SnapshotPacket> STREAM_CODEC = new StreamCodec<>()
@@ -205,13 +406,17 @@ public final class NetworkHandler
             @Override
             public void encode(RegistryFriendlyByteBuf buffer, SnapshotPacket packet)
             {
+                buffer.writeLong(packet.sequence);
+                buffer.writeVarInt(packet.chunkIndex);
+                buffer.writeVarInt(packet.chunkCount);
                 writeSnapshot(buffer, packet.snapshot);
             }
 
             @Override
             public SnapshotPacket decode(RegistryFriendlyByteBuf buffer)
             {
-                return new SnapshotPacket(readSnapshot(buffer));
+                return new SnapshotPacket(buffer.readLong(), Math.max(0, buffer.readVarInt()),
+                        Math.max(1, buffer.readVarInt()), readSnapshot(buffer));
             }
         };
 
@@ -219,7 +424,63 @@ public final class NetworkHandler
         {
             if (context.flow() == PacketFlow.CLIENTBOUND)
             {
-                context.enqueueWork(() -> ClientStorageState.apply(packet.snapshot));
+                context.enqueueWork(() -> ClientStorageState.applySnapshotChunk(
+                        packet.sequence, packet.chunkIndex, packet.chunkCount, packet.snapshot));
+            }
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type()
+        {
+            return TYPE;
+        }
+    }
+
+    private record StorageDeltaPacket(long sequence, int chunkIndex, int chunkCount,
+                                      StorageSnapshot metadata, List<StorageEntry> changes)
+            implements CustomPacketPayload
+    {
+        private static final Type<StorageDeltaPacket> TYPE =
+                new Type<>(BetterBeyondDimensions.id("storage_delta"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, StorageDeltaPacket> STREAM_CODEC =
+                new StreamCodec<>()
+                {
+                    @Override
+                    public void encode(RegistryFriendlyByteBuf buffer, StorageDeltaPacket packet)
+                    {
+                        buffer.writeLong(packet.sequence);
+                        buffer.writeVarInt(packet.chunkIndex);
+                        buffer.writeVarInt(packet.chunkCount);
+                        StorageSnapshot payload = new StorageSnapshot(
+                                packet.metadata.available(), packet.metadata.networkName(),
+                                packet.metadata.shiftPlayerInventory(), packet.metadata.shiftContainer(),
+                                packet.metadata.sidebarHidden(), packet.changes);
+                        writeSnapshot(buffer, payload);
+                    }
+
+                    @Override
+                    public StorageDeltaPacket decode(RegistryFriendlyByteBuf buffer)
+                    {
+                        long sequence = buffer.readLong();
+                        int chunkIndex = Math.max(0, buffer.readVarInt());
+                        int chunkCount = Math.max(1, buffer.readVarInt());
+                        StorageSnapshot payload = readSnapshot(buffer);
+                        StorageSnapshot metadata = new StorageSnapshot(
+                                payload.available(), payload.networkName(),
+                                payload.shiftPlayerInventory(), payload.shiftContainer(),
+                                payload.sidebarHidden(), List.of());
+                        return new StorageDeltaPacket(sequence, chunkIndex, chunkCount,
+                                metadata, payload.entries());
+                    }
+                };
+
+        private static void handle(StorageDeltaPacket packet, IPayloadContext context)
+        {
+            if (context.flow() == PacketFlow.CLIENTBOUND)
+            {
+                context.enqueueWork(() -> ClientStorageState.applyDeltaChunk(
+                        packet.sequence, packet.chunkIndex, packet.chunkCount,
+                        packet.metadata, packet.changes));
             }
         }
 
