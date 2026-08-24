@@ -13,6 +13,7 @@ import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 import net.xuwu.betterbeyonddimensions.client.ClientStorageState;
+import net.xuwu.betterbeyonddimensions.client.SidebarSettingsStore;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorage;
 import net.xuwu.betterbeyonddimensions.common.RecipeFill;
 import net.xuwu.betterbeyonddimensions.common.StorageActions;
@@ -32,7 +33,7 @@ import java.util.function.Supplier;
 /** Forge 1.20.1 packet channel for sidebar requests and server snapshots. */
 public final class NetworkHandler
 {
-    private static final String PROTOCOL_VERSION = "3";
+    private static final String PROTOCOL_VERSION = "4";
     private static final int MAX_SYNC_PACKET_BYTES = 921600;
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             BetterBeyondDimensions.id("main"),
@@ -53,6 +54,14 @@ public final class NetworkHandler
         CHANNEL.registerMessage(nextId++, RequestSnapshotPacket.class,
                 (packet, buffer) -> { }, buffer -> new RequestSnapshotPacket(),
                 NetworkHandler::handleRequestSnapshot,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER));
+        CHANNEL.registerMessage(nextId++, SetShiftSettingsPacket.class,
+                (packet, buffer) -> {
+                    buffer.writeBoolean(packet.playerShift);
+                    buffer.writeBoolean(packet.containerShift);
+                },
+                buffer -> new SetShiftSettingsPacket(buffer.readBoolean(), buffer.readBoolean()),
+                NetworkHandler::handleSetShiftSettings,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
         CHANNEL.registerMessage(nextId++, SnapshotPacket.class,
                 NetworkHandler::encodeSnapshot, NetworkHandler::decodeSnapshot,
@@ -145,17 +154,33 @@ public final class NetworkHandler
 
     public static void requestSnapshot()
     {
+        SidebarSettingsStore.Settings settings = SidebarSettingsStore.get();
+        sendShiftSettings(settings.playerShift(), settings.containerShift());
         CHANNEL.sendToServer(new RequestSnapshotPacket());
     }
 
     public static void togglePlayerShift()
     {
-        CHANNEL.sendToServer(new TogglePacket(StorageActions.TOGGLE_PLAYER_SHIFT));
+        SidebarSettingsStore.Settings settings = SidebarSettingsStore.get();
+        setShiftSettings(!settings.playerShift(), settings.containerShift());
     }
 
     public static void toggleContainerShift()
     {
-        CHANNEL.sendToServer(new TogglePacket(StorageActions.TOGGLE_CONTAINER_SHIFT));
+        SidebarSettingsStore.Settings settings = SidebarSettingsStore.get();
+        setShiftSettings(settings.playerShift(), !settings.containerShift());
+    }
+
+    public static void setShiftSettings(boolean playerShift, boolean containerShift)
+    {
+        SidebarSettingsStore.set(playerShift, containerShift);
+        sendShiftSettings(playerShift, containerShift);
+        CHANNEL.sendToServer(new RequestSnapshotPacket());
+    }
+
+    private static void sendShiftSettings(boolean playerShift, boolean containerShift)
+    {
+        CHANNEL.sendToServer(new SetShiftSettingsPacket(playerShift, containerShift));
     }
 
     public static void setSidebarHidden(boolean hidden)
@@ -228,6 +253,20 @@ public final class NetworkHandler
             if (player != null)
             {
                 sendSnapshot(player);
+            }
+        });
+        context.setPacketHandled(true);
+    }
+
+    private static void handleSetShiftSettings(SetShiftSettingsPacket packet,
+                                                Supplier<NetworkEvent.Context> contextSupplier)
+    {
+        NetworkEvent.Context context = contextSupplier.get();
+        context.enqueueWork(() -> {
+            ServerPlayer player = context.getSender();
+            if (player != null)
+            {
+                StorageActions.setShiftSettings(player, packet.playerShift, packet.containerShift);
             }
         });
         context.setPacketHandled(true);
@@ -643,6 +682,18 @@ public final class NetworkHandler
 
     private static final class RequestSnapshotPacket
     {
+    }
+
+    private static final class SetShiftSettingsPacket
+    {
+        private final boolean playerShift;
+        private final boolean containerShift;
+
+        private SetShiftSettingsPacket(boolean playerShift, boolean containerShift)
+        {
+            this.playerShift = playerShift;
+            this.containerShift = containerShift;
+        }
     }
 
     private static final class SnapshotPacket

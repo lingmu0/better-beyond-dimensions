@@ -49,6 +49,17 @@ public final class StorageActions
         return player.getPersistentData().getBoolean(SHIFT_CONTAINER_TAG);
     }
 
+    public static void setShiftSettings(Player player, boolean shiftPlayer, boolean shiftContainer)
+    {
+        if (player == null)
+        {
+            return;
+        }
+        CompoundTag data = player.getPersistentData();
+        data.putBoolean(SHIFT_PLAYER_TAG, shiftPlayer);
+        data.putBoolean(SHIFT_CONTAINER_TAG, shiftContainer);
+    }
+
     public static boolean isSidebarHidden(Player player)
     {
         return player.getPersistentData().getBoolean(SIDEBAR_HIDDEN_TAG);
@@ -76,17 +87,16 @@ public final class StorageActions
             return false;
         }
 
-        CompoundTag data = player.getPersistentData();
         if (target == TOGGLE_PLAYER_SHIFT)
         {
             boolean next = !isShiftPlayerInventoryEnabled(player);
-            data.putBoolean(SHIFT_PLAYER_TAG, next);
+            setShiftSettings(player, next, isShiftContainerEnabled(player));
             return next;
         }
         if (target == TOGGLE_CONTAINER_SHIFT)
         {
             boolean next = !isShiftContainerEnabled(player);
-            data.putBoolean(SHIFT_CONTAINER_TAG, next);
+            setShiftSettings(player, isShiftPlayerInventoryEnabled(player), next);
             return next;
         }
         return false;

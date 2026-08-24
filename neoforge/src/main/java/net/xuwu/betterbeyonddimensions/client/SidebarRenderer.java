@@ -72,7 +72,7 @@ public final class SidebarRenderer
     /** Updates the real menu Slots before vanilla starts rendering its container slots. */
     public static void prepareSlots(SidebarScreenAccess host)
     {
-        if (!ClientStorageState.available() || host.bbd$isSidebarHidden())
+        if (!host.bbd$isSidebarEnabled() || !ClientStorageState.available() || host.bbd$isSidebarHidden())
         {
             host.bbd$updateSidebarSlots(List.of());
             return;
@@ -87,7 +87,7 @@ public final class SidebarRenderer
     public static void render(SidebarScreenAccess host, GuiGraphics graphics, int mouseX, int mouseY, float partialTick)
     {
         StorageSnapshot snapshot = ClientStorageState.snapshot();
-        if (!snapshot.available())
+        if (!host.bbd$isSidebarEnabled() || !snapshot.available())
         {
             host.bbd$updateSidebarSlots(List.of());
             setWidgetsVisible(host, false);
@@ -145,6 +145,10 @@ public final class SidebarRenderer
 
     public static boolean handleMouseClick(SidebarScreenAccess host, double mouseX, double mouseY, int button)
     {
+        if (!host.bbd$isSidebarEnabled())
+        {
+            return false;
+        }
         EditBox search = host.bbd$getSearchBox();
         if (search == null)
         {
@@ -195,7 +199,7 @@ public final class SidebarRenderer
 
     public static boolean handleMouseDrag(SidebarScreenAccess host, double mouseX, double mouseY, int button)
     {
-        if (button != 0 || !host.bbd$isSidebarDragging())
+        if (!host.bbd$isSidebarEnabled() || button != 0 || !host.bbd$isSidebarDragging())
         {
             return false;
         }
@@ -222,7 +226,8 @@ public final class SidebarRenderer
 
     public static boolean handleScroll(SidebarScreenAccess host, double mouseX, double mouseY, double scrollAmount)
     {
-        if (!ClientStorageState.available() || host.bbd$isSidebarHidden() || scrollAmount == 0.0D)
+        if (!host.bbd$isSidebarEnabled() || !ClientStorageState.available()
+                || host.bbd$isSidebarHidden() || scrollAmount == 0.0D)
         {
             return false;
         }
@@ -256,7 +261,7 @@ public final class SidebarRenderer
     public static boolean renderStorageTooltip(SidebarScreenAccess host, GuiGraphics graphics,
                                                int mouseX, int mouseY)
     {
-        if (!ClientStorageState.available() || host.bbd$isSidebarHidden()
+        if (!host.bbd$isSidebarEnabled() || !ClientStorageState.available() || host.bbd$isSidebarHidden()
                 || !host.bbd$getCarried().isEmpty())
         {
             return false;
@@ -369,20 +374,38 @@ public final class SidebarRenderer
         setWidgetsVisible(host, visible);
         Button toggle = host.bbd$getSidebarToggleButton();
         toggle.visible = true;
-        toggle.active = true;
-        toggle.setMessage(Component.literal(host.bbd$isSidebarHidden() ? "+" : "×"));
-        toggle.setTooltip(Tooltip.create(Component.translatable(host.bbd$isSidebarHidden()
-                ? "better_beyond_dimensions.tooltip.show_sidebar"
-                : "better_beyond_dimensions.tooltip.hide_sidebar")));
+        configureButton(host, toggle, SidebarDisplayEvent.ButtonId.SIDEBAR_TOGGLE,
+                Component.literal(host.bbd$isSidebarHidden() ? "+" : "×"),
+                Component.translatable(host.bbd$isSidebarHidden()
+                        ? "better_beyond_dimensions.tooltip.show_sidebar"
+                        : "better_beyond_dimensions.tooltip.hide_sidebar"));
         StorageSnapshot snapshot = ClientStorageState.snapshot();
         boolean player = snapshot.shiftPlayerInventory();
         boolean container = snapshot.shiftContainer();
-        host.bbd$getPlayerShiftButton().setMessage(Component.translatable(
-                "better_beyond_dimensions.button.shift_player", player ? "✓" : "×"));
-        host.bbd$getContainerShiftButton().setMessage(Component.translatable(
-                "better_beyond_dimensions.button.shift_container", container ? "✓" : "×"));
-        host.bbd$getDepositContainerButton().setMessage(Component.translatable("better_beyond_dimensions.button.deposit_container"));
-        host.bbd$getDepositPlayerButton().setMessage(Component.translatable("better_beyond_dimensions.button.deposit_player"));
+        configureButton(host, host.bbd$getPlayerShiftButton(), SidebarDisplayEvent.ButtonId.PLAYER_SHIFT,
+                Component.translatable("better_beyond_dimensions.button.shift_player", player ? "✓" : "×"),
+                Component.translatable("better_beyond_dimensions.tooltip.shift_player"));
+        configureButton(host, host.bbd$getContainerShiftButton(), SidebarDisplayEvent.ButtonId.CONTAINER_SHIFT,
+                Component.translatable("better_beyond_dimensions.button.shift_container", container ? "✓" : "×"),
+                Component.translatable("better_beyond_dimensions.tooltip.shift_container"));
+        configureButton(host, host.bbd$getDepositContainerButton(), SidebarDisplayEvent.ButtonId.DEPOSIT_CONTAINER,
+                Component.translatable("better_beyond_dimensions.button.deposit_container"),
+                Component.translatable("better_beyond_dimensions.tooltip.deposit_container"));
+        configureButton(host, host.bbd$getDepositPlayerButton(), SidebarDisplayEvent.ButtonId.DEPOSIT_PLAYER,
+                Component.translatable("better_beyond_dimensions.button.deposit_player"),
+                Component.translatable("better_beyond_dimensions.tooltip.deposit_player"));
+    }
+
+    private static void configureButton(SidebarScreenAccess host, Button button,
+                                        SidebarDisplayEvent.ButtonId buttonId,
+                                        Component defaultMessage, Component defaultTooltip)
+    {
+        SidebarDisplayEvent event = host.bbd$getSidebarDisplayEvent();
+        Component message = event == null ? null : event.getButtonMessage(buttonId);
+        Component tooltip = event == null ? null : event.getButtonTooltip(buttonId);
+        button.setMessage(message == null ? defaultMessage : message);
+        button.setTooltip(Tooltip.create(tooltip == null ? defaultTooltip : tooltip));
+        button.active = button.visible && host.bbd$isSidebarButtonEnabled(buttonId);
     }
 
     private static void setWidgetsVisible(SidebarScreenAccess host, boolean visible)
@@ -446,7 +469,7 @@ public final class SidebarRenderer
 
     public static NetworkStorageSlot findSlotAt(SidebarScreenAccess host, double mouseX, double mouseY)
     {
-        if (!ClientStorageState.available() || host.bbd$isSidebarHidden())
+        if (!host.bbd$isSidebarEnabled() || !ClientStorageState.available() || host.bbd$isSidebarHidden())
         {
             return null;
         }

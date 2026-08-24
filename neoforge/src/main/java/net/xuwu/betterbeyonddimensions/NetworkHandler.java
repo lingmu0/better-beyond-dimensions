@@ -16,6 +16,7 @@ import net.neoforged.neoforge.network.handling.DirectionalPayloadHandler;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import net.xuwu.betterbeyonddimensions.client.ClientStorageState;
+import net.xuwu.betterbeyonddimensions.client.SidebarSettingsStore;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorage;
 import net.xuwu.betterbeyonddimensions.common.RecipeFill;
 import net.xuwu.betterbeyonddimensions.common.StorageActions;
@@ -43,9 +44,11 @@ public final class NetworkHandler
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event)
     {
-        PayloadRegistrar registrar = event.registrar("3");
+        PayloadRegistrar registrar = event.registrar("4");
         registrar.playBidirectional(RequestSnapshotPacket.TYPE, RequestSnapshotPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(RequestSnapshotPacket::handle, RequestSnapshotPacket::handle));
+        registrar.playBidirectional(SetShiftSettingsPacket.TYPE, SetShiftSettingsPacket.STREAM_CODEC,
+                new DirectionalPayloadHandler<>(SetShiftSettingsPacket::handle, SetShiftSettingsPacket::handle));
         registrar.playBidirectional(SnapshotPacket.TYPE, SnapshotPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(SnapshotPacket::handle, SnapshotPacket::handle));
         registrar.playBidirectional(StorageDeltaPacket.TYPE, StorageDeltaPacket.STREAM_CODEC,
@@ -68,17 +71,33 @@ public final class NetworkHandler
 
     public static void requestSnapshot()
     {
+        SidebarSettingsStore.Settings settings = SidebarSettingsStore.get();
+        sendShiftSettings(settings.playerShift(), settings.containerShift());
         PacketDistributor.sendToServer(new RequestSnapshotPacket());
     }
 
     public static void togglePlayerShift()
     {
-        PacketDistributor.sendToServer(new TogglePacket(StorageActions.TOGGLE_PLAYER_SHIFT));
+        SidebarSettingsStore.Settings settings = SidebarSettingsStore.get();
+        setShiftSettings(!settings.playerShift(), settings.containerShift());
     }
 
     public static void toggleContainerShift()
     {
-        PacketDistributor.sendToServer(new TogglePacket(StorageActions.TOGGLE_CONTAINER_SHIFT));
+        SidebarSettingsStore.Settings settings = SidebarSettingsStore.get();
+        setShiftSettings(settings.playerShift(), !settings.containerShift());
+    }
+
+    public static void setShiftSettings(boolean playerShift, boolean containerShift)
+    {
+        SidebarSettingsStore.set(playerShift, containerShift);
+        sendShiftSettings(playerShift, containerShift);
+        PacketDistributor.sendToServer(new RequestSnapshotPacket());
+    }
+
+    private static void sendShiftSettings(boolean playerShift, boolean containerShift)
+    {
+        PacketDistributor.sendToServer(new SetShiftSettingsPacket(playerShift, containerShift));
     }
 
     public static void setSidebarHidden(boolean hidden)
@@ -426,6 +445,38 @@ public final class NetworkHandler
             {
                 context.enqueueWork(() -> ClientStorageState.applySnapshotChunk(
                         packet.sequence, packet.chunkIndex, packet.chunkCount, packet.snapshot));
+            }
+        }
+
+        @Override
+        public Type<? extends CustomPacketPayload> type()
+        {
+            return TYPE;
+        }
+    }
+
+    private record SetShiftSettingsPacket(boolean playerShift, boolean containerShift)
+            implements CustomPacketPayload
+    {
+        private static final Type<SetShiftSettingsPacket> TYPE =
+                new Type<>(BetterBeyondDimensions.id("set_shift_settings"));
+        private static final StreamCodec<RegistryFriendlyByteBuf, SetShiftSettingsPacket> STREAM_CODEC =
+                StreamCodec.composite(
+                        ByteBufCodecs.BOOL, SetShiftSettingsPacket::playerShift,
+                        ByteBufCodecs.BOOL, SetShiftSettingsPacket::containerShift,
+                        SetShiftSettingsPacket::new
+                );
+
+        private static void handle(SetShiftSettingsPacket packet, IPayloadContext context)
+        {
+            if (context.flow() == PacketFlow.SERVERBOUND)
+            {
+                context.enqueueWork(() -> {
+                    if (context.player() instanceof ServerPlayer player)
+                    {
+                        StorageActions.setShiftSettings(player, packet.playerShift, packet.containerShift);
+                    }
+                });
             }
         }
 

@@ -11,6 +11,9 @@ import java.util.List;
 public interface SidebarScreenAccess
 {
     EditBox bbd$getSearchBox();
+    SidebarDisplayEvent bbd$getSidebarDisplayEvent();
+    boolean bbd$isSidebarEnabled();
+    boolean bbd$isSidebarButtonEnabled(SidebarDisplayEvent.ButtonId button);
     Button bbd$getPlayerShiftButton();
     Button bbd$getContainerShiftButton();
     Button bbd$getDepositContainerButton();
