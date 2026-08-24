@@ -1,11 +1,9 @@
 package net.xuwu.betterbeyonddimensions.client;
 
-import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.xuwu.betterbeyonddimensions.BetterBeyondDimensions;
 import net.xuwu.betterbeyonddimensions.NetworkHandler;
@@ -30,44 +28,31 @@ public final class SidebarClientEvents
         }
     }
 
-    @SubscribeEvent
-    public static void onClientTick(ClientTickEvent.Post event)
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onKeyPressed(ScreenEvent.KeyPressed.Pre event)
     {
-        Minecraft minecraft = Minecraft.getInstance();
-        if (!(minecraft.screen instanceof SidebarScreenAccess host)
+        if (!(event.getScreen() instanceof SidebarScreenAccess host)
                 || host.bbd$getSearchBox() == null
                 || !host.bbd$isSidebarEnabled()
                 || host.bbd$isSidebarHidden()
                 || !ClientStorageState.available()
                 || host.bbd$getSearchBox().isFocused())
         {
-            drainKeyPresses();
             return;
         }
 
-        while (SidebarKeyMappings.DEPOSIT_CONTAINER.consumeClick())
+        if (SidebarKeyMappings.DEPOSIT_CONTAINER.matches(event.getKeyCode(), event.getScanCode())
+                && host.bbd$isSidebarButtonEnabled(SidebarDisplayEvent.ButtonId.DEPOSIT_CONTAINER))
         {
-            if (host.bbd$isSidebarButtonEnabled(SidebarDisplayEvent.ButtonId.DEPOSIT_CONTAINER))
-            {
-                NetworkHandler.depositContainer();
-            }
+            NetworkHandler.depositContainer();
+            event.setCanceled(true);
+            return;
         }
-        while (SidebarKeyMappings.DEPOSIT_PLAYER.consumeClick())
+        if (SidebarKeyMappings.DEPOSIT_PLAYER.matches(event.getKeyCode(), event.getScanCode())
+                && host.bbd$isSidebarButtonEnabled(SidebarDisplayEvent.ButtonId.DEPOSIT_PLAYER))
         {
-            if (host.bbd$isSidebarButtonEnabled(SidebarDisplayEvent.ButtonId.DEPOSIT_PLAYER))
-            {
-                NetworkHandler.depositPlayerInventory();
-            }
-        }
-    }
-
-    private static void drainKeyPresses()
-    {
-        while (SidebarKeyMappings.DEPOSIT_CONTAINER.consumeClick())
-        {
-        }
-        while (SidebarKeyMappings.DEPOSIT_PLAYER.consumeClick())
-        {
+            NetworkHandler.depositPlayerInventory();
+            event.setCanceled(true);
         }
     }
 }

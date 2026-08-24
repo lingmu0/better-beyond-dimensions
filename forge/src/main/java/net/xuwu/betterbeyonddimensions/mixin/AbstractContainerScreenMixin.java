@@ -134,6 +134,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
                 SidebarRenderer.WIDTH - 14,
                 Math.max(18, SidebarRenderer.getPanelHeight() - SidebarRenderer.getGridTop() - 7)
         ));
+        bbd$layoutSidebarWidgets();
 
         bbd$sidebarDisplayEvent = new SidebarDisplayEvent((Screen) (Object) this);
         MinecraftForge.EVENT_BUS.post(bbd$sidebarDisplayEvent);
@@ -366,9 +367,9 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         bbd$playerShiftButton.setY(firstButtonY);
         bbd$containerShiftButton.setX(secondButtonX);
         bbd$containerShiftButton.setY(firstButtonY);
-        bbd$depositContainerButton.setX(firstButtonX);
+        bbd$depositContainerButton.setX(secondButtonX);
         bbd$depositContainerButton.setY(secondButtonY);
-        bbd$depositPlayerButton.setX(secondButtonX);
+        bbd$depositPlayerButton.setX(firstButtonX);
         bbd$depositPlayerButton.setY(secondButtonY);
         bbd$sidebarToggleButton.setX(SidebarRenderer.getToggleX(x));
         bbd$sidebarToggleButton.setY(y + 4);
@@ -407,6 +408,7 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         boolean hidden = !ClientStorageState.isSidebarHidden();
         ClientStorageState.setSidebarHidden(hidden);
         NetworkHandler.setSidebarHidden(hidden);
+        bbd$layoutSidebarWidgets();
         if (hidden && bbd$searchBox != null)
         {
             ((net.minecraft.client.gui.screens.Screen) (Object) this).setFocused(null);
