@@ -3,6 +3,7 @@
   "minVersion": "0.8",
   "package": "net.xuwu.betterbeyonddimensions.mixin",
   "compatibilityLevel": "JAVA_17",
+  "refmap": "better_beyond_dimensions.refmap.json",
   "mixins": [
     "AbstractContainerMenuMixin",
     "JeiRecipeTransferServerMixin",
