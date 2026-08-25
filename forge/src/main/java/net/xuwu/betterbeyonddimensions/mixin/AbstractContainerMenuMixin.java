@@ -5,6 +5,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
 import net.xuwu.betterbeyonddimensions.NetworkHandler;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorageMenuAccess;
 import net.xuwu.betterbeyonddimensions.common.NetworkStorageSlot;
@@ -14,6 +15,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.ArrayList;
@@ -76,5 +78,21 @@ public abstract class AbstractContainerMenuMixin implements NetworkStorageMenuAc
             NetworkHandler.sendSnapshot(serverPlayer);
             callbackInfo.cancel();
         }
+    }
+
+    /**
+     * Vanilla's merge pass in moveItemStackTo does not check Slot#mayPlace before it
+     * increases an existing matching stack. A visible network slot would therefore
+     * consume a normal container stack even though it is not a vanilla insertion target.
+     * Hide network slots from that merge scan; sidebar interactions use the server-side
+     * sidebar click path instead.
+     */
+    @Redirect(
+            method = "moveItemStackTo",
+            at = @At(value = "INVOKE",
+                    target = "Lnet/minecraft/world/inventory/Slot;getItem()Lnet/minecraft/world/item/ItemStack;"))
+    private ItemStack bbd$hideNetworkSlotFromVanillaMerge(Slot slot)
+    {
+        return slot instanceof NetworkStorageSlot ? ItemStack.EMPTY : slot.getItem();
     }
 }
