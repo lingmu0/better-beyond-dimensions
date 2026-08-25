@@ -17,6 +17,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.ArrayList;
@@ -142,6 +143,22 @@ public abstract class AbstractContainerMenuMixin implements NetworkStorageMenuAc
                 callbackInfo.cancel();
             }
         }
+    }
+
+    /**
+     * Vanilla's merge pass in moveItemStackTo does not check Slot#mayPlace before it
+     * increases an existing matching stack. A visible network slot would therefore
+     * consume a normal container stack even though it is intentionally not a vanilla
+     * insertion target. Hide network slots from that vanilla merge scan; sidebar
+     * interactions are handled by the server-side sidebar click path instead.
+     */
+    @Redirect(
+            method = "moveItemStackTo",
+            at = @At(value = "INVOKE",
+                    target = "Lnet/minecraft/world/inventory/Slot;getItem()Lnet/minecraft/world/item/ItemStack;"))
+    private ItemStack bbd$hideNetworkSlotFromVanillaMerge(Slot slot)
+    {
+        return slot instanceof NetworkStorageSlot ? ItemStack.EMPTY : slot.getItem();
     }
 
     @Unique
