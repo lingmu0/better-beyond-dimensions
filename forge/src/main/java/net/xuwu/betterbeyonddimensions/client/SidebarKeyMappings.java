@@ -26,7 +26,7 @@ public final class SidebarKeyMappings
     public static final KeyMapping DEPOSIT_PLAYER = new KeyMapping(
             "key.better_beyond_dimensions.deposit_player",
             InputConstants.Type.KEYSYM,
-            GLFW.GLFW_KEY_G,
+            InputConstants.UNKNOWN.getValue(),
             "key.categories.better_beyond_dimensions"
     );
 

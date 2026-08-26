@@ -1,5 +1,6 @@
 package net.xuwu.betterbeyonddimensions.client;
 
+import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -28,6 +29,41 @@ public final class SidebarClientEvents
         }
     }
 
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onRenderPost(ScreenEvent.Render.Post event)
+    {
+        if (!(event.getScreen() instanceof SidebarScreenAccess host)
+                || host.bbd$getSearchBox() == null
+                || !host.bbd$isSidebarEnabled())
+        {
+            return;
+        }
+
+        host.bbd$rebuildSidebarSlots();
+        event.getGuiGraphics().pose().pushPose();
+        event.getGuiGraphics().pose().translate(0.0D, 0.0D, SidebarRenderer.RENDER_Z_OFFSET);
+        try
+        {
+            SidebarRenderer.render(
+                    host,
+                    event.getGuiGraphics(),
+                    event.getMouseX(),
+                    event.getMouseY(),
+                    Minecraft.getInstance().getTimer().getGameTimeDeltaPartialTick(false)
+            );
+            SidebarRenderer.renderPostTooltip(
+                    host,
+                    event.getGuiGraphics(),
+                    event.getMouseX(),
+                    event.getMouseY()
+            );
+        }
+        finally
+        {
+            event.getGuiGraphics().pose().popPose();
+        }
+    }
+
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onKeyPressed(ScreenEvent.KeyPressed.Pre event)
     {
@@ -36,7 +72,9 @@ public final class SidebarClientEvents
                 || !host.bbd$isSidebarEnabled()
                 || host.bbd$isSidebarHidden()
                 || !ClientStorageState.available()
-                || host.bbd$getSearchBox().isFocused())
+                // Do not consume the deposit shortcuts while any text input on the
+                // current screen is focused, including search boxes supplied by other mods.
+                || TextInputFocusTracker.isTextInputFocused(event.getScreen()))
         {
             return;
         }

@@ -11,6 +11,7 @@
     "compat.SophisticatedStorageContainerMenuMixin"
   ],
   "client": [
+    "EditBoxFocusMixin",
     "ScreenWidgetAccessor",
     "SlotPositionAccessor",
     "AbstractContainerScreenMixin",

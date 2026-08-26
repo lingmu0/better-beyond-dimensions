@@ -158,6 +158,16 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         }
     }
 
+    @Inject(method = "render", at = @At("TAIL"))
+    private void bbd$prepareSidebarTooltip(GuiGraphics graphics, int mouseX, int mouseY, float partialTick,
+                                           CallbackInfo callbackInfo)
+    {
+        if (!bbd$isSidebarExcludedScreen() && bbd$isSidebarEnabled() && bbd$searchBox != null)
+        {
+            SidebarRenderer.renderTooltip(this, graphics, mouseX, mouseY);
+        }
+    }
+
     @Inject(method = "renderSlot", at = @At("HEAD"), cancellable = true)
     private void bbd$skipNativeSidebarSlot(GuiGraphics graphics, Slot slot, CallbackInfo callbackInfo)
     {
@@ -179,17 +189,6 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         screen.bbd$getRenderables().add(widget);
         screen.bbd$getNarratables().add(widget);
         return widget;
-    }
-
-    @Inject(method = "render", at = @At("TAIL"))
-    private void bbd$renderSidebar(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo callbackInfo)
-    {
-        if (!bbd$isSidebarExcludedScreen() && bbd$isSidebarEnabled() && bbd$searchBox != null)
-        {
-            bbd$rebuildSidebarSlots();
-            SidebarRenderer.render(this, graphics, mouseX, mouseY, partialTick);
-            SidebarRenderer.renderTooltip(this, graphics, mouseX, mouseY);
-        }
     }
 
     /** Use the exact typed-stack tooltip path used by Beyond Dimensions' own screens. */
