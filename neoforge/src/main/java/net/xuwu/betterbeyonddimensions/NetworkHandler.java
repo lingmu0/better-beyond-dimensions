@@ -44,7 +44,7 @@ public final class NetworkHandler
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event)
     {
-        PayloadRegistrar registrar = event.registrar("4");
+        PayloadRegistrar registrar = event.registrar("5");
         registrar.playBidirectional(RequestSnapshotPacket.TYPE, RequestSnapshotPacket.STREAM_CODEC,
                 new DirectionalPayloadHandler<>(RequestSnapshotPacket::handle, RequestSnapshotPacket::handle));
         registrar.playBidirectional(SetShiftSettingsPacket.TYPE, SetShiftSettingsPacket.STREAM_CODEC,
@@ -155,11 +155,17 @@ public final class NetworkHandler
 
     public static void fillRecipe(List<RecipeFill> fills)
     {
+        fillRecipe(fills, false, false);
+    }
+
+    public static void fillRecipe(List<RecipeFill> fills, boolean maxTransfer,
+                                  boolean requireCompleteSets)
+    {
         if (fills == null || fills.isEmpty())
         {
             return;
         }
-        PacketDistributor.sendToServer(new RecipeFillPacket(fills));
+        PacketDistributor.sendToServer(new RecipeFillPacket(fills, maxTransfer, requireCompleteSets));
     }
 
     public static void sendSnapshot(ServerPlayer player)
@@ -757,7 +763,8 @@ public final class NetworkHandler
         }
     }
 
-    private record RecipeFillPacket(List<RecipeFill> fills) implements CustomPacketPayload
+    private record RecipeFillPacket(List<RecipeFill> fills, boolean maxTransfer,
+                                    boolean requireCompleteSets) implements CustomPacketPayload
     {
         private static final Type<RecipeFillPacket> TYPE = new Type<>(BetterBeyondDimensions.id("recipe_fill"));
         private static final StreamCodec<RegistryFriendlyByteBuf, RecipeFillPacket> STREAM_CODEC = new StreamCodec<>()
@@ -775,6 +782,8 @@ public final class NetworkHandler
                     ItemStack.OPTIONAL_STREAM_CODEC.encode(buffer, fill.stack());
                     buffer.writeVarInt(Math.min(64, fill.amount()));
                 }
+                buffer.writeBoolean(packet.maxTransfer);
+                buffer.writeBoolean(packet.requireCompleteSets);
             }
 
             @Override
@@ -790,7 +799,7 @@ public final class NetworkHandler
                             Math.min(64, Math.max(0, buffer.readVarInt()))
                     ));
                 }
-                return new RecipeFillPacket(fills);
+                return new RecipeFillPacket(fills, buffer.readBoolean(), buffer.readBoolean());
             }
         };
 
@@ -801,7 +810,8 @@ public final class NetworkHandler
                 context.enqueueWork(() -> {
                     if (context.player() instanceof ServerPlayer player)
                     {
-                        StorageActions.fillRecipe(player, packet.fills);
+                        StorageActions.fillRecipe(player, packet.fills,
+                                packet.maxTransfer, packet.requireCompleteSets);
                         sendSnapshot(player);
                     }
                 });

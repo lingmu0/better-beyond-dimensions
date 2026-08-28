@@ -25,11 +25,6 @@ public final class SidebarRenderer
     public static final int SEARCH_LEFT = 4;
     public static final int TOGGLE_WIDTH = 12;
     public static final int CONTROL_GAP = 3;
-    /**
-     * Draw above vanilla/JEI item decorations and tooltip layers. Sidebar
-     * tooltips are rendered once more from the post-render pass above this.
-     */
-    public static final float RENDER_Z_OFFSET = 500.0F;
 
     private static final int GRID_TOP = CommonTextures.TOP_BASE_COMMON_HEIGHT
             + CommonTextures.COMMON_CONNECTION_HEIGHT
@@ -258,58 +253,32 @@ public final class SidebarRenderer
     }
 
     /**
-     * Renders sidebar tooltips after the host screen and other overlays have finished.
-     * The post-render z layer keeps them above tooltips from items underneath the sidebar.
-     */
-    public static void renderPostTooltip(SidebarScreenAccess host, GuiGraphics graphics,
-                                         int mouseX, int mouseY)
-    {
-        if (!host.bbd$isSidebarEnabled() || !ClientStorageState.available())
-        {
-            return;
-        }
-
-        if (!host.bbd$isSidebarHidden())
-        {
-            NetworkStorageSlot slot = findSlotAt(host, mouseX, mouseY);
-            if (slot != null && slot.hasItem() && slot.getKey() != null)
-            {
-                slot.getKey().getRender().renderTooltip(
-                        graphics,
-                        Minecraft.getInstance().font,
-                        slot.getKey(),
-                        slot.getStoredAmount(),
-                        mouseX,
-                        mouseY
-                );
-                return;
-            }
-        }
-
-        renderButtonTooltipPost(host, graphics, mouseX, mouseY);
-    }
-
-    /**
-     * Cancels the host screen's tooltip whenever the mouse is over the visible sidebar.
-     * This also covers empty cells, where there is no sidebar item tooltip to replace it.
+     * Replaces vanilla's ItemStack tooltip with Beyond Dimensions' native typed-stack tooltip.
+     * Calling this from the container's normal tooltip phase avoids duplicate tooltip passes.
      */
     public static boolean renderStorageTooltip(SidebarScreenAccess host, GuiGraphics graphics,
                                                int mouseX, int mouseY)
     {
-        return isMouseOverSidebar(host, mouseX, mouseY);
-    }
-
-    public static boolean isMouseOverSidebar(SidebarScreenAccess host, double mouseX, double mouseY)
-    {
-        if (!host.bbd$isSidebarEnabled() || !ClientStorageState.available() || host.bbd$isSidebarHidden())
+        if (!host.bbd$isSidebarEnabled() || !ClientStorageState.available() || host.bbd$isSidebarHidden()
+                || !host.bbd$getCarried().isEmpty())
         {
             return false;
         }
 
-        int x = host.bbd$getSidebarX();
-        int y = host.bbd$getSidebarY();
-        return mouseX >= x && mouseX < x + WIDTH
-                && mouseY >= y && mouseY < y + getPanelHeight();
+        NetworkStorageSlot slot = findSlotAt(host, mouseX, mouseY);
+        if (slot != null && slot.hasItem() && slot.getKey() != null)
+        {
+            slot.getKey().getRender().renderTooltip(
+                    graphics,
+                    Minecraft.getInstance().font,
+                    slot.getKey(),
+                    slot.getStoredAmount(),
+                    mouseX,
+                    mouseY
+            );
+            return true;
+        }
+        return false;
     }
 
     private static void renderButtonTooltip(SidebarScreenAccess host, int mouseX, int mouseY)
@@ -327,31 +296,6 @@ public final class SidebarRenderer
             {
                 ((Screen) (Object) host).setTooltipForNextRenderPass(
                         button.getTooltip().toCharSequence(Minecraft.getInstance()));
-                return;
-            }
-        }
-    }
-
-    private static void renderButtonTooltipPost(SidebarScreenAccess host, GuiGraphics graphics,
-                                                int mouseX, int mouseY)
-    {
-        Button[] buttons = {
-                host.bbd$getPlayerShiftButton(),
-                host.bbd$getContainerShiftButton(),
-                host.bbd$getDepositContainerButton(),
-                host.bbd$getDepositPlayerButton(),
-                host.bbd$getSidebarToggleButton()
-        };
-        for (Button button : buttons)
-        {
-            if (button.visible && button.isMouseOver(mouseX, mouseY) && button.getTooltip() != null)
-            {
-                graphics.renderTooltip(
-                        Minecraft.getInstance().font,
-                        button.getTooltip().toCharSequence(Minecraft.getInstance()),
-                        mouseX,
-                        mouseY
-                );
                 return;
             }
         }

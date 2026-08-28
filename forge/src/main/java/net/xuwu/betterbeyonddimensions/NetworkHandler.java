@@ -33,7 +33,7 @@ import java.util.function.Supplier;
 /** Forge 1.20.1 packet channel for sidebar requests and server snapshots. */
 public final class NetworkHandler
 {
-    private static final String PROTOCOL_VERSION = "4";
+    private static final String PROTOCOL_VERSION = "5";
     private static final int MAX_SYNC_PACKET_BYTES = 921600;
     private static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             BetterBeyondDimensions.id("main"),
@@ -137,6 +137,8 @@ public final class NetworkHandler
                         buffer.writeItem(fill.stack());
                         buffer.writeVarInt(Math.min(64, fill.amount()));
                     }
+                    buffer.writeBoolean(packet.maxTransfer);
+                    buffer.writeBoolean(packet.requireCompleteSets);
                 },
                 buffer -> {
                     int count = Math.min(64, Math.max(0, buffer.readVarInt()));
@@ -146,7 +148,7 @@ public final class NetworkHandler
                         fills.add(new RecipeFill(buffer.readVarInt(), buffer.readItem(),
                                 Math.min(64, Math.max(0, buffer.readVarInt()))));
                     }
-                    return new RecipeFillPacket(fills);
+                    return new RecipeFillPacket(fills, buffer.readBoolean(), buffer.readBoolean());
                 },
                 NetworkHandler::handleRecipeFill,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER));
@@ -238,11 +240,17 @@ public final class NetworkHandler
 
     public static void fillRecipe(List<RecipeFill> fills)
     {
+        fillRecipe(fills, false, false);
+    }
+
+    public static void fillRecipe(List<RecipeFill> fills, boolean maxTransfer,
+                                  boolean requireCompleteSets)
+    {
         if (fills == null || fills.isEmpty())
         {
             return;
         }
-        CHANNEL.sendToServer(new RecipeFillPacket(List.copyOf(fills)));
+        CHANNEL.sendToServer(new RecipeFillPacket(List.copyOf(fills), maxTransfer, requireCompleteSets));
     }
 
     private static void handleRequestSnapshot(RequestSnapshotPacket packet, Supplier<NetworkEvent.Context> contextSupplier)
@@ -396,7 +404,8 @@ public final class NetworkHandler
             ServerPlayer player = context.getSender();
             if (player != null)
             {
-                StorageActions.fillRecipe(player, packet.fills);
+                StorageActions.fillRecipe(player, packet.fills,
+                        packet.maxTransfer, packet.requireCompleteSets);
                 sendSnapshot(player);
             }
         });
@@ -802,10 +811,14 @@ public final class NetworkHandler
     private static final class RecipeFillPacket
     {
         private final List<RecipeFill> fills;
+        private final boolean maxTransfer;
+        private final boolean requireCompleteSets;
 
-        private RecipeFillPacket(List<RecipeFill> fills)
+        private RecipeFillPacket(List<RecipeFill> fills, boolean maxTransfer, boolean requireCompleteSets)
         {
             this.fills = fills == null ? List.of() : List.copyOf(fills);
+            this.maxTransfer = maxTransfer;
+            this.requireCompleteSets = requireCompleteSets;
         }
     }
 }

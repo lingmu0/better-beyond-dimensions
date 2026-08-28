@@ -1,9 +1,9 @@
 package net.xuwu.betterbeyonddimensions.client;
 
-import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.xuwu.betterbeyonddimensions.BetterBeyondDimensions;
@@ -17,6 +17,20 @@ public final class SidebarClientEvents
     {
     }
 
+    @SubscribeEvent
+    public static void onClientLoggingIn(ClientPlayerNetworkEvent.LoggingIn event)
+    {
+        // Packet sequence numbers and the storage view belong to one server connection.
+        // Clear them before the first snapshot of a new world/server is accepted.
+        ClientStorageState.clear();
+    }
+
+    @SubscribeEvent
+    public static void onClientLoggingOut(ClientPlayerNetworkEvent.LoggingOut event)
+    {
+        ClientStorageState.clear();
+    }
+
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onMouseScrolled(ScreenEvent.MouseScrolled.Pre event)
     {
@@ -26,41 +40,6 @@ public final class SidebarClientEvents
                         host, event.getMouseX(), event.getMouseY(), event.getScrollDeltaY()))
         {
             event.setCanceled(true);
-        }
-    }
-
-    @SubscribeEvent(priority = EventPriority.LOWEST)
-    public static void onRenderPost(ScreenEvent.Render.Post event)
-    {
-        if (!(event.getScreen() instanceof SidebarScreenAccess host)
-                || host.bbd$getSearchBox() == null
-                || !host.bbd$isSidebarEnabled())
-        {
-            return;
-        }
-
-        host.bbd$rebuildSidebarSlots();
-        event.getGuiGraphics().pose().pushPose();
-        event.getGuiGraphics().pose().translate(0.0D, 0.0D, SidebarRenderer.RENDER_Z_OFFSET);
-        try
-        {
-            SidebarRenderer.render(
-                    host,
-                    event.getGuiGraphics(),
-                    event.getMouseX(),
-                    event.getMouseY(),
-                    Minecraft.getInstance().getTimer().getGameTimeDeltaPartialTick(false)
-            );
-            SidebarRenderer.renderPostTooltip(
-                    host,
-                    event.getGuiGraphics(),
-                    event.getMouseX(),
-                    event.getMouseY()
-            );
-        }
-        finally
-        {
-            event.getGuiGraphics().pose().popPose();
         }
     }
 

@@ -21,6 +21,8 @@ import net.xuwu.betterbeyonddimensions.common.RecipeFill;
 import net.xuwu.betterbeyonddimensions.common.StorageEntry;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
+import org.spongepowered.asm.mixin.Final;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -37,11 +39,21 @@ import java.util.Set;
 @Mixin(targets = "mezz.jei.library.transfer.BasicRecipeTransferHandler", remap = false)
 public abstract class JeiBasicRecipeTransferHandlerMixin
 {
+    @Shadow
+    @Final
+    private IRecipeTransferInfo transferInfo;
+
     @Unique
     private final List<NetworkStorageSlot> bbd$temporaryNetworkSlots = new ArrayList<>();
 
     @Unique
     private AbstractContainerMenu bbd$temporaryNetworkMenu;
+
+    @Unique
+    private boolean bbd$maxTransfer;
+
+    @Unique
+    private boolean bbd$requireCompleteSets;
 
     @Inject(method = "transferRecipe", at = @At("HEAD"), remap = false, require = 0)
     private void bbd$addPageIndependentSources(AbstractContainerMenu menu,
@@ -52,6 +64,8 @@ public abstract class JeiBasicRecipeTransferHandlerMixin
                                                 boolean doTransfer,
                                                 CallbackInfoReturnable<IRecipeTransferError> callbackInfo)
     {
+        bbd$maxTransfer = maxTransfer;
+        bbd$requireCompleteSets = transferInfo.requireCompleteSets(menu, recipe);
         bbd$removeTemporaryNetworkSlots();
         if (!ClientStorageState.available() || ClientStorageState.isSidebarHidden()
                 || !(menu instanceof NetworkStorageMenuAccess access))
@@ -179,7 +193,7 @@ public abstract class JeiBasicRecipeTransferHandlerMixin
 
             if (valid && !fills.isEmpty())
             {
-                NetworkHandler.fillRecipe(fills);
+                NetworkHandler.fillRecipe(fills, bbd$maxTransfer, bbd$requireCompleteSets);
                 return;
             }
         }

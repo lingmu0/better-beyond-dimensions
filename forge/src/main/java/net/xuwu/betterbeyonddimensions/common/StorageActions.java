@@ -24,6 +24,8 @@ import java.util.List;
  */
 public final class StorageActions
 {
+    private static final int MAX_RECIPE_TRANSFER_SETS = 4096;
+
     public static final int TOGGLE_PLAYER_SHIFT = 0;
     public static final int TOGGLE_CONTAINER_SHIFT = 1;
     public static final int DEPOSIT_CONTAINER = 2;
@@ -115,8 +117,9 @@ public final class StorageActions
         }
 
         Inventory inventory = player.getInventory();
-        // Slots 9..35 are the main inventory. The hotbar (0..8) is intentionally excluded.
-        for (int index = 9; index < inventory.getContainerSize(); index++)
+        // Slots 9..35 are the main inventory. The hotbar (0..8), armor (36..39), and
+        // offhand (40) are intentionally excluded.
+        for (int index = 9; index < 36; index++)
         {
             depositStack(network, inventory.getItem(index));
         }
@@ -141,35 +144,75 @@ public final class StorageActions
         }
 
         Container playerInventory = player.getInventory();
+        List<Slot> inputSlots = new ArrayList<>();
+        List<Slot> normalSlots = new ArrayList<>();
+        List<Slot> unknownSlots = new ArrayList<>();
         List<Slot> outputSlots = new ArrayList<>();
         for (Slot slot : menu.slots)
         {
-            if (!(slot instanceof NetworkStorageSlot)
-                    && slot.container != playerInventory
-                    && slot.hasItem()
-                    && (slot instanceof ResultSlot || !slot.mayPlace(slot.getItem())))
+            if (slot instanceof NetworkStorageSlot
+                    || slot.container == playerInventory
+                    || !slot.hasItem())
             {
-                outputSlots.add(slot);
-                if (slot instanceof ResultSlot resultSlot)
-                {
-                    quickCraftResultToNetwork(player, menu, resultSlot, network);
-                }
-                else
-                {
-                    quickTransferOutputToNetwork(player, menu, slot, network);
-                }
+                continue;
+            }
+
+            switch (classifyDepositSlot(slot))
+            {
+                case INPUT -> inputSlots.add(slot);
+                case NORMAL -> normalSlots.add(slot);
+                case UNKNOWN -> unknownSlots.add(slot);
+                case OUTPUT -> outputSlots.add(slot);
             }
         }
-        for (Slot slot : menu.slots)
+
+        // Keep recipe ingredients ahead of ordinary storage slots and outputs. Removing an
+        // ingredient first also lets crafting menus invalidate their result before the output
+        // pass reaches it.
+        for (List<Slot> slots : List.of(inputSlots, normalSlots, unknownSlots))
         {
-            if (!(slot instanceof NetworkStorageSlot)
-                    && !outputSlots.contains(slot)
-                    && slot.container != playerInventory && slot.hasItem())
+            for (Slot slot : slots)
             {
                 transferSlotToNetwork(player, menu, slot, network);
             }
         }
+        for (Slot slot : outputSlots)
+        {
+            if (slot instanceof ResultSlot resultSlot)
+            {
+                quickCraftResultToNetwork(player, menu, resultSlot, network);
+            }
+            else
+            {
+                quickTransferOutputToNetwork(player, menu, slot, network);
+            }
+        }
         menu.broadcastChanges();
+    }
+
+    private static DepositSlotKind classifyDepositSlot(Slot slot)
+    {
+        if (slot instanceof ResultSlot || !slot.mayPlace(slot.getItem()))
+        {
+            return DepositSlotKind.OUTPUT;
+        }
+        if (slot.container instanceof CraftingContainer)
+        {
+            return DepositSlotKind.INPUT;
+        }
+        if (slot.getClass() == Slot.class)
+        {
+            return DepositSlotKind.NORMAL;
+        }
+        return DepositSlotKind.UNKNOWN;
+    }
+
+    private enum DepositSlotKind
+    {
+        INPUT,
+        NORMAL,
+        UNKNOWN,
+        OUTPUT
     }
 
     /**
@@ -646,6 +689,12 @@ public final class StorageActions
      */
     public static void fillRecipe(ServerPlayer player, List<RecipeFill> fills)
     {
+        fillRecipe(player, fills, false, false);
+    }
+
+    public static void fillRecipe(ServerPlayer player, List<RecipeFill> fills,
+                                  boolean maxTransfer, boolean requireCompleteSets)
+    {
         if (player == null || player.containerMenu == null || fills == null || fills.isEmpty())
         {
             return;
@@ -654,8 +703,12 @@ public final class StorageActions
         DimensionsNet network = DimensionsNet.getNetFromPlayer(player);
         UnifiedStorage storage = isSidebarHidden(player) || network == null
                 ? null : network.getUnifiedStorage();
-        List<Container> changedContainers = new ArrayList<>();
+        List<RecipeTarget> targets = new ArrayList<>();
+        Container playerInventory = player.getInventory();
 
+        // Build and validate the target list before changing either the network or the menu.
+        // JEI normally sends one operation per recipe slot; de-duplicating here also makes the
+        // packet safe for handlers that describe the same target more than once.
         for (RecipeFill fill : fills)
         {
             if (fill == null || fill.slotId() < 0 || fill.slotId() >= player.containerMenu.slots.size())
@@ -663,79 +716,131 @@ public final class StorageActions
                 continue;
             }
 
-            Slot target = player.containerMenu.slots.get(fill.slotId());
-            boolean craftingTarget = target.container instanceof CraftingContainer;
             ItemStack desired = fill.stack() == null ? ItemStack.EMPTY : fill.stack().copy();
-            if (target instanceof NetworkStorageSlot
-                    || target instanceof ResultSlot
-                    || target.container == player.getInventory()
-                    || (!craftingTarget && (desired.isEmpty() || fill.amount() <= 0)))
-            {
-                continue;
-            }
-
-            ItemStack current = target.getItem().copy();
-
             if (desired.isEmpty() || fill.amount() <= 0)
             {
-                if (!current.isEmpty() && canInsertIntoPlayerInventory(player, current))
-                {
-                    insertIntoPlayerInventory(player, current);
-                    target.set(ItemStack.EMPTY);
-                    addChangedContainer(changedContainers, target.container);
-                }
                 continue;
             }
 
+            Slot target = player.containerMenu.slots.get(fill.slotId());
             desired.setCount(1);
-            if (!target.mayPlace(desired))
+            if (target instanceof NetworkStorageSlot
+                    || target instanceof ResultSlot
+                    || target.container == playerInventory
+                    || !target.mayPlace(desired))
             {
                 continue;
             }
 
-            if (!current.isEmpty() && !sameStoredStack(current, desired))
+            boolean alreadyAdded = false;
+            for (RecipeTarget existing : targets)
+            {
+                if (existing.slot() == target)
+                {
+                    alreadyAdded = true;
+                    break;
+                }
+            }
+            if (!alreadyAdded)
+            {
+                targets.add(new RecipeTarget(target, desired,
+                        Math.min(64, Math.max(1, fill.amount()))));
+            }
+        }
+
+        if (targets.isEmpty())
+        {
+            return;
+        }
+
+        List<Container> changedContainers = new ArrayList<>();
+
+        // If a handler changes an already occupied recipe slot to another ingredient, return
+        // the old stack to the player's inventory before filling the new recipe. This mirrors
+        // JEI's normal shuffle step and avoids silently deleting the old ingredient.
+        for (RecipeTarget target : targets)
+        {
+            ItemStack current = target.slot().getItem();
+            if (!current.isEmpty() && !sameStoredStack(current, target.desired()))
             {
                 if (!canInsertIntoPlayerInventory(player, current))
                 {
+                    return;
+                }
+                if (insertIntoPlayerInventory(player, current) < current.getCount())
+                {
+                    return;
+                }
+                target.slot().set(ItemStack.EMPTY);
+                addChangedContainer(changedContainers, target.slot().container);
+            }
+        }
+
+        int iterations = maxTransfer ? MAX_RECIPE_TRANSFER_SETS : 1;
+        for (int iteration = 0; iteration < iterations; iteration++)
+        {
+            List<RecipeAcquisition> acquired = new ArrayList<>();
+            java.util.Map<Slot, ItemStack> originalTargets = new java.util.LinkedHashMap<>();
+            boolean complete = true;
+            boolean progressed = false;
+
+            for (RecipeTarget target : targets)
+            {
+                Slot slot = target.slot();
+                ItemStack desired = target.desired();
+                int limit = Math.min(slot.getMaxStackSize(desired), desired.getMaxStackSize());
+                limit = Math.max(1, limit);
+                ItemStack current = slot.getItem();
+                if (!current.isEmpty() && !sameStoredStack(current, desired))
+                {
+                    complete = false;
                     continue;
                 }
-                insertIntoPlayerInventory(player, current);
-                target.set(ItemStack.EMPTY);
-                current = ItemStack.EMPTY;
-                addChangedContainer(changedContainers, target.container);
-            }
-
-            int limit = Math.min(target.getMaxStackSize(desired), desired.getMaxStackSize());
-            int requested = Math.min(Math.max(1, fill.amount()), Math.max(1, limit));
-            int currentCount = current.isEmpty() ? 0 : current.getCount();
-            int missing = Math.max(0, requested - currentCount);
-            if (missing <= 0)
-            {
-                continue;
-            }
-
-            int inserted = 0;
-            if (storage != null)
-            {
-                ItemStackKey key = new ItemStackKey(desired);
-                KeyAmount extracted = storage.extract(key, missing, false, false);
-                if (extracted.amount() > 0L)
+                int currentCount = current.isEmpty() ? 0 : current.getCount();
+                int requiredCount = maxTransfer
+                        ? iteration + 1 : target.requestedAmount();
+                requiredCount = Math.min(limit, Math.max(1, requiredCount));
+                if (currentCount >= requiredCount)
                 {
-                    inserted = (int) Math.min((long) missing, extracted.amount());
+                    continue;
                 }
-            }
 
-            if (inserted < missing)
-            {
-                inserted += removeFromPlayerInventory(player, desired, missing - inserted);
-            }
+                ItemStackKey key = new ItemStackKey(desired);
+                boolean fromNetwork = false;
+                if (storage != null)
+                {
+                    KeyAmount extracted = storage.extract(key, 1L, false, false);
+                    fromNetwork = extracted.amount() > 0L;
+                }
 
-            if (inserted > 0)
-            {
+                if (!fromNetwork && removeFromPlayerInventory(player, desired, 1) <= 0)
+                {
+                    complete = false;
+                    continue;
+                }
+
+                originalTargets.putIfAbsent(slot, current.copy());
                 ItemStack result = current.isEmpty() ? desired.copy() : current.copy();
-                result.setCount(currentCount + inserted);
-                target.set(result);
-                addChangedContainer(changedContainers, target.container);
+                result.setCount(current.isEmpty() ? 1 : current.getCount() + 1);
+                slot.set(result);
+                addChangedContainer(changedContainers, slot.container);
+                acquired.add(new RecipeAcquisition(key, fromNetwork));
+                progressed = true;
+            }
+
+            if (!complete && (!maxTransfer || requireCompleteSets))
+            {
+                for (java.util.Map.Entry<Slot, ItemStack> original : originalTargets.entrySet())
+                {
+                    original.getKey().set(original.getValue());
+                }
+                rollbackRecipeAcquisitions(player, storage, acquired);
+                break;
+            }
+
+            if (!progressed || !complete)
+            {
+                break;
             }
         }
 
@@ -744,6 +849,37 @@ public final class StorageActions
             player.containerMenu.slotsChanged(container);
         }
         player.containerMenu.broadcastChanges();
+    }
+
+    private static void rollbackRecipeAcquisitions(ServerPlayer player, UnifiedStorage storage,
+                                                   List<RecipeAcquisition> acquired)
+    {
+        for (RecipeAcquisition acquisition : acquired)
+        {
+            if (acquisition.fromNetwork())
+            {
+                if (storage != null)
+                {
+                    storage.insert(acquisition.key(), 1L, false);
+                }
+            }
+            else
+            {
+                ItemStack restored = acquisition.key().copyStackWithCount(1);
+                if (!player.getInventory().add(restored) && !restored.isEmpty())
+                {
+                    player.drop(restored, false);
+                }
+            }
+        }
+    }
+
+    private record RecipeTarget(Slot slot, ItemStack desired, int requestedAmount)
+    {
+    }
+
+    private record RecipeAcquisition(ItemStackKey key, boolean fromNetwork)
+    {
     }
 
     /**
